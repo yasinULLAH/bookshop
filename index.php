@@ -1,50 +1,45 @@
 <?php
+ob_start();
 session_start();
 define('DB_SERVER', 'localhost');
 define('DB_USERNAME', 'root');
 define('DB_PASSWORD', 'root');
 define('DB_NAME', 'bookshop_management');
 define('UPLOAD_DIR', 'uploads/covers/');
-
 if (!is_dir(UPLOAD_DIR)) {
     mkdir(UPLOAD_DIR, 0777, true);
 }
-
 $conn = new mysqli(DB_SERVER, DB_USERNAME, DB_PASSWORD, DB_NAME);
-
 if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
-
 $conn->set_charset("utf8mb4");
-
 function html($text)
 {
     return htmlspecialchars($text ?? '', ENT_QUOTES, 'UTF-8');
 }
-
 function redirect($page, $params = [])
 {
     $queryString = http_build_query($params);
     header("Location: index.php?page=$page" . ($queryString ? "&$queryString" : ""));
     exit();
 }
-
 function isAdmin()
 {
     return isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'admin';
 }
-
+function isCustomer()
+{
+    return isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'customer';
+}
 function isStaff()
 {
     return isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'staff';
 }
-
 function isLoggedIn()
 {
-    return isset($_SESSION['user_id']);
+    return isset($_SESSION['user_id']) || isset($_SESSION['customer_id']);
 }
-
 function generate_uuid()
 {
     return sprintf(
@@ -59,25 +54,26 @@ function generate_uuid()
         mt_rand(0, 0xffff)
     );
 }
-
 function format_currency($amount)
 {
     return 'PKR ' . number_format($amount, 2);
 }
-
 function format_date($timestamp)
 {
     return date('M d, Y h:i A', is_numeric($timestamp) ? $timestamp : strtotime($timestamp));
 }
-
 function format_short_date($timestamp)
 {
     return date('Y-m-d', is_numeric($timestamp) ? $timestamp : strtotime($timestamp));
 }
-
 if (isset($_GET['action'])) {
+    if ($_GET['action'] === 'logout') {
+        session_destroy();
+        session_start();
+        $_SESSION['toast'] = ['type' => 'info', 'message' => 'You have been logged out.'];
+        redirect('login');
+    }
     if (in_array($_GET['action'], ['get_public_books_json'])) {
-        // Public API calls (no login required)
     } elseif (!isLoggedIn()) {
         echo json_encode(['success' => false, 'message' => 'Unauthorized']);
         exit();
@@ -92,24 +88,20 @@ if (isset($_GET['action'])) {
             $sort = $_GET['sort'] ?? 'title-asc';
             $limit = $_GET['limit'] ?? 10;
             $offset = ($page - 1) * $limit;
-
             $where_clauses = [];
             $params = [];
             $types = '';
-
             if ($book_id) {
                 $where_clauses[] = "id = ?";
                 $params[] = $book_id;
                 $types .= 'i';
             }
-
             if ($search) {
                 $search_term = '%' . $search . '%';
                 $where_clauses[] = "(title LIKE ? OR author LIKE ? OR isbn LIKE ? OR category LIKE ?)";
                 $params = array_merge($params, [$search_term, $search_term, $search_term, $search_term]);
                 $types .= 'ssss';
             }
-
             $order_by = '';
             switch ($sort) {
                 case 'title-asc':
@@ -131,9 +123,7 @@ if (isset($_GET['action'])) {
                     $order_by = 'stock DESC';
                     break;
             }
-
             $where_sql = count($where_clauses) > 0 ? 'WHERE ' . implode(' AND ', $where_clauses) : '';
-
             $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM books $where_sql");
             if ($types) {
                 $stmt->bind_param($types, ...$params);
@@ -141,17 +131,14 @@ if (isset($_GET['action'])) {
             $stmt->execute();
             $total_items = $stmt->get_result()->fetch_assoc()['total'];
             $stmt->close();
-
             $sql = "SELECT * FROM books $where_sql ORDER BY $order_by LIMIT ? OFFSET ?";
             $stmt = $conn->prepare($sql);
-
             if ($types) {
                 $all_params = array_merge($params, [$limit, $offset]);
                 $stmt->bind_param($types . 'ii', ...$all_params);
             } else {
                 $stmt->bind_param('ii', $limit, $offset);
             }
-
             $stmt->execute();
             $result = $stmt->get_result();
             $books = [];
@@ -161,7 +148,6 @@ if (isset($_GET['action'])) {
             $stmt->close();
             echo json_encode(['success' => true, 'books' => $books, 'total_items' => $total_items]);
             exit();
-
         case 'get_public_books_json':
             $page = $_GET['page_num'] ?? 1;
             $search = $_GET['search'] ?? '';
@@ -169,24 +155,20 @@ if (isset($_GET['action'])) {
             $sort = $_GET['sort'] ?? 'title-asc';
             $limit = $_GET['limit'] ?? 12;
             $offset = ($page - 1) * $limit;
-
             $where_clauses = ["stock > 0"];
             $params = [];
             $types = '';
-
             if ($search) {
                 $search_term = '%' . $search . '%';
                 $where_clauses[] = "(title LIKE ? OR author LIKE ? OR isbn LIKE ? OR description LIKE ?)";
                 $params = array_merge($params, [$search_term, $search_term, $search_term, $search_term]);
                 $types .= 'ssss';
             }
-
             if ($category !== 'all') {
                 $where_clauses[] = "category = ?";
                 $params[] = $category;
                 $types .= 's';
             }
-
             $order_by = '';
             switch ($sort) {
                 case 'title-asc':
@@ -202,9 +184,7 @@ if (isset($_GET['action'])) {
                     $order_by = 'price DESC';
                     break;
             }
-
             $where_sql = 'WHERE ' . implode(' AND ', $where_clauses);
-
             $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM books $where_sql");
             if ($types) {
                 $stmt->bind_param($types, ...$params);
@@ -212,17 +192,14 @@ if (isset($_GET['action'])) {
             $stmt->execute();
             $total_items = $stmt->get_result()->fetch_assoc()['total'];
             $stmt->close();
-
             $sql = "SELECT id, title, author, category, isbn, price, stock, description, cover_image FROM books $where_sql ORDER BY $order_by LIMIT ? OFFSET ?";
             $stmt = $conn->prepare($sql);
-
             if ($types) {
                 $all_params = array_merge($params, [$limit, $offset]);
                 $stmt->bind_param($types . 'ii', ...$all_params);
             } else {
                 $stmt->bind_param('ii', $limit, $offset);
             }
-
             $stmt->execute();
             $result = $stmt->get_result();
             $books = [];
@@ -232,7 +209,6 @@ if (isset($_GET['action'])) {
             $stmt->close();
             echo json_encode(['success' => true, 'books' => $books, 'total_items' => $total_items]);
             exit();
-
         case 'get_customers_json':
             $customer_id = $_GET['customer_id'] ?? null;
             $page = $_GET['page_num'] ?? 1;
@@ -240,32 +216,26 @@ if (isset($_GET['action'])) {
             $status = $_GET['status'] ?? 'all';
             $limit = 10;
             $offset = ($page - 1) * $limit;
-
             $where_clauses = [];
             $params = [];
             $types = '';
-
             if ($customer_id) {
                 $where_clauses[] = "id = ?";
                 $params[] = $customer_id;
                 $types .= 'i';
             }
-
             if ($search) {
                 $search_term = '%' . $search . '%';
                 $where_clauses[] = "(name LIKE ? OR email LIKE ? OR phone LIKE ?)";
                 $params = array_merge($params, [$search_term, $search_term, $search_term]);
                 $types .= 'sss';
             }
-
             if ($status !== 'all') {
                 $where_clauses[] = "is_active = ?";
                 $params[] = ($status === 'active' ? 1 : 0);
                 $types .= 'i';
             }
-
             $where_sql = count($where_clauses) > 0 ? 'WHERE ' . implode(' AND ', $where_clauses) : '';
-
             $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM customers $where_sql");
             if ($types) {
                 $stmt->bind_param($types, ...$params);
@@ -273,7 +243,6 @@ if (isset($_GET['action'])) {
             $stmt->execute();
             $total_items = $stmt->get_result()->fetch_assoc()['total'];
             $stmt->close();
-
             $sql = "SELECT * FROM customers $where_sql ORDER BY name ASC LIMIT ? OFFSET ?";
             $stmt = $conn->prepare($sql);
             if ($types) {
@@ -291,33 +260,27 @@ if (isset($_GET['action'])) {
             $stmt->close();
             echo json_encode(['success' => true, 'customers' => $customers, 'total_items' => $total_items]);
             exit();
-
         case 'get_suppliers_json':
             $supplier_id = $_GET['supplier_id'] ?? null;
             $page = $_GET['page_num'] ?? 1;
             $search = $_GET['search'] ?? '';
             $limit = 10;
             $offset = ($page - 1) * $limit;
-
             $where_clauses = [];
             $params = [];
             $types = '';
-
             if ($supplier_id) {
                 $where_clauses[] = "id = ?";
                 $params[] = $supplier_id;
                 $types .= 'i';
             }
-
             if ($search) {
                 $search_term = '%' . $search . '%';
                 $where_clauses[] = "(name LIKE ? OR contact_person LIKE ? OR email LIKE ? OR phone LIKE ?)";
                 $params = array_merge($params, [$search_term, $search_term, $search_term, $search_term]);
                 $types .= 'ssss';
             }
-
             $where_sql = count($where_clauses) > 0 ? 'WHERE ' . implode(' AND ', $where_clauses) : '';
-
             $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM suppliers $where_sql");
             if ($types) {
                 $stmt->bind_param($types, ...$params);
@@ -325,7 +288,6 @@ if (isset($_GET['action'])) {
             $stmt->execute();
             $total_items = $stmt->get_result()->fetch_assoc()['total'];
             $stmt->close();
-
             $sql = "SELECT * FROM suppliers $where_sql ORDER BY name ASC LIMIT ? OFFSET ?";
             $stmt = $conn->prepare($sql);
             if ($types) {
@@ -343,7 +305,6 @@ if (isset($_GET['action'])) {
             $stmt->close();
             echo json_encode(['success' => true, 'suppliers' => $suppliers, 'total_items' => $total_items]);
             exit();
-
         case 'get_pos_json':
             $po_id = $_GET['po_id'] ?? null;
             $page = $_GET['page_num'] ?? 1;
@@ -351,32 +312,26 @@ if (isset($_GET['action'])) {
             $status = $_GET['status'] ?? 'all';
             $limit = 10;
             $offset = ($page - 1) * $limit;
-
             $where_clauses = [];
             $params = [];
             $types = '';
-
             if ($po_id) {
                 $where_clauses[] = "po.id = ?";
                 $params[] = $po_id;
                 $types .= 'i';
             }
-
             if ($search) {
                 $search_term = '%' . $search . '%';
                 $where_clauses[] = "(po.id LIKE ? OR s.name LIKE ? OR po.status LIKE ?)";
                 $params = array_merge($params, [$search_term, $search_term, $search_term]);
                 $types .= 'sss';
             }
-
             if ($status !== 'all') {
                 $where_clauses[] = "po.status = ?";
                 $params[] = $status;
                 $types .= 's';
             }
-
             $where_sql = count($where_clauses) > 0 ? 'WHERE ' . implode(' AND ', $where_clauses) : '';
-
             $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM purchase_orders po JOIN suppliers s ON po.supplier_id = s.id $where_sql");
             if ($types) {
                 $stmt->bind_param($types, ...$params);
@@ -384,7 +339,6 @@ if (isset($_GET['action'])) {
             $stmt->execute();
             $total_items = $stmt->get_result()->fetch_assoc()['total'];
             $stmt->close();
-
             $sql = "SELECT po.*, s.name AS supplier_name 
                     FROM purchase_orders po 
                     JOIN suppliers s ON po.supplier_id = s.id 
@@ -414,26 +368,21 @@ if (isset($_GET['action'])) {
             $stmt->close();
             echo json_encode(['success' => true, 'purchase_orders' => $purchase_orders, 'total_items' => $total_items]);
             exit();
-
         case 'get_books_for_cart_json':
             $page = $_GET['page_num'] ?? 1;
             $search = $_GET['search'] ?? '';
             $limit = 10;
             $offset = ($page - 1) * $limit;
-
             $where_clauses = ["stock > 0"];
             $params = [];
             $types = '';
-
             if ($search) {
                 $search_term = '%' . $search . '%';
                 $where_clauses[] = "(title LIKE ? OR author LIKE ? OR isbn LIKE ?)";
                 $params = array_merge($params, [$search_term, $search_term, $search_term]);
                 $types .= 'sss';
             }
-
             $where_sql = 'WHERE ' . implode(' AND ', $where_clauses);
-
             $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM books $where_sql");
             if ($types) {
                 $stmt->bind_param($types, ...$params);
@@ -441,7 +390,6 @@ if (isset($_GET['action'])) {
             $stmt->execute();
             $total_items = $stmt->get_result()->fetch_assoc()['total'];
             $stmt->close();
-
             $sql = "SELECT * FROM books $where_sql ORDER BY title ASC LIMIT ? OFFSET ?";
             $stmt = $conn->prepare($sql);
             if ($types) {
@@ -459,28 +407,23 @@ if (isset($_GET['action'])) {
             $stmt->close();
             echo json_encode(['success' => true, 'books' => $books, 'total_items' => $total_items]);
             exit();
-
         case 'get_sales_json':
             $page = $_GET['page_num'] ?? 1;
             $search = $_GET['search'] ?? '';
             $limit = 10;
             $offset = ($page - 1) * $limit;
-
             $where_clauses = [];
             $params = [];
             $types = '';
-
             if ($search) {
                 $search_term = '%' . $search . '%';
                 $where_clauses[] = "(s.id LIKE ? OR c.name LIKE ? OR b.title LIKE ?)";
                 $params = array_merge($params, [$search_term, $search_term, $search_term]);
                 $types .= 'sss';
             }
-
             $where_sql = count($where_clauses) > 0 ? 'WHERE ' . implode(' AND ', $where_clauses) : '';
             $join_sql = "LEFT JOIN customers c ON s.customer_id = c.id LEFT JOIN sale_items si ON s.id = si.sale_id LEFT JOIN books b ON si.book_id = b.id";
             $group_by = "GROUP BY s.id";
-
             $stmt = $conn->prepare("SELECT COUNT(DISTINCT s.id) AS total FROM sales s $join_sql $where_sql");
             if ($types) {
                 $stmt->bind_param($types, ...$params);
@@ -488,7 +431,6 @@ if (isset($_GET['action'])) {
             $stmt->execute();
             $total_items = $stmt->get_result()->fetch_assoc()['total'];
             $stmt->close();
-
             $sql = "SELECT s.*, c.name AS customer_name,
                     GROUP_CONCAT(CONCAT(b.title, ' (', si.quantity, ')') SEPARATOR ', ') AS item_titles
                     FROM sales s
@@ -512,7 +454,23 @@ if (isset($_GET['action'])) {
             $stmt->close();
             echo json_encode(['success' => true, 'sales' => $sales_records, 'total_items' => $total_items]);
             exit();
-
+        case 'get_customer_details_json':
+            if (!isCustomer()) {
+                echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+                exit();
+            }
+            $customer_id = $_SESSION['customer_id'];
+            $stmt = $conn->prepare("SELECT name, phone, email, address FROM customers WHERE id = ?");
+            $stmt->bind_param('i', $customer_id);
+            $stmt->execute();
+            $customer = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($customer) {
+                echo json_encode(['success' => true, 'customer' => $customer]);
+            } else {
+                echo json_encode(['success' => false, 'message' => 'Customer not found.']);
+            }
+            exit();
         case 'get_sale_details_json':
             if (!isAdmin() && !isStaff()) {
                 echo json_encode(['success' => false, 'message' => 'Unauthorized']);
@@ -527,7 +485,6 @@ if (isset($_GET['action'])) {
             $stmt->execute();
             $sale = $stmt->get_result()->fetch_assoc();
             $stmt->close();
-
             if ($sale) {
                 $stmt_items = $conn->prepare("SELECT si.*, b.title FROM sale_items si JOIN books b ON si.book_id = b.id WHERE si.sale_id = ?");
                 $stmt_items->bind_param('i', $sale_id);
@@ -540,13 +497,16 @@ if (isset($_GET['action'])) {
                 echo json_encode(['success' => false, 'message' => 'Sale not found.']);
             }
             exit();
-
         case 'get_customer_history_json':
-            if (!isAdmin() && !isStaff()) {
+            if (!isAdmin() && !isStaff() && !isCustomer()) {
                 echo json_encode(['success' => false, 'message' => 'Unauthorized']);
                 exit();
             }
-            $customer_id = $_GET['customer_id'] ?? '';
+            $customer_id = isCustomer() ? $_SESSION['customer_id'] : ($_GET['customer_id'] ?? '');
+            if (empty($customer_id)) {
+                echo json_encode(['success' => false, 'message' => 'Customer ID not provided.']);
+                exit();
+            }
             $stmt = $conn->prepare("SELECT s.*, 
                                     GROUP_CONCAT(CONCAT(b.title, ' (', si.quantity, ')') SEPARATOR ', ') AS item_titles
                                     FROM sales s
@@ -561,26 +521,21 @@ if (isset($_GET['action'])) {
             $stmt->close();
             echo json_encode(['success' => true, 'sales' => $sales]);
             exit();
-
         case 'get_promotions_json':
             if (!isAdmin()) {
                 echo json_encode(['success' => false, 'message' => 'Unauthorized']);
                 exit();
             }
             $promotion_id = $_GET['promotion_id'] ?? null;
-
             $where_clauses = [];
             $params = [];
             $types = '';
-
             if ($promotion_id) {
                 $where_clauses[] = "p.id = ?";
                 $params[] = $promotion_id;
                 $types .= 'i';
             }
-
             $where_sql = count($where_clauses) > 0 ? 'WHERE ' . implode(' AND ', $where_clauses) : '';
-
             $promotions = [];
             $sql = "SELECT p.*, b.title AS book_title, b.author AS book_author 
                     FROM promotions p 
@@ -593,7 +548,6 @@ if (isset($_GET['action'])) {
             }
             $stmt->execute();
             $result = $stmt->get_result();
-
             if ($result) {
                 while ($row = $result->fetch_assoc()) {
                     if ($row['applies_to'] === 'specific-book' && $row['book_title']) {
@@ -611,7 +565,6 @@ if (isset($_GET['action'])) {
             $stmt->close();
             echo json_encode(['success' => true, 'promotions' => $promotions]);
             exit();
-
         case 'get_expenses_json':
             if (!isAdmin()) {
                 echo json_encode(['success' => false, 'message' => 'Unauthorized']);
@@ -623,32 +576,26 @@ if (isset($_GET['action'])) {
             $month = $_GET['month'] ?? '';
             $limit = 10;
             $offset = ($page - 1) * $limit;
-
             $where_clauses = [];
             $params = [];
             $types = '';
-
             if ($expense_id) {
                 $where_clauses[] = "id = ?";
                 $params[] = $expense_id;
                 $types .= 'i';
             }
-
             if ($search) {
                 $search_term = '%' . $search . '%';
                 $where_clauses[] = "(description LIKE ? OR category LIKE ?)";
                 $params = array_merge($params, [$search_term, $search_term]);
                 $types .= 'ss';
             }
-
             if ($month) {
                 $where_clauses[] = "DATE_FORMAT(expense_date, '%Y-%m') = ?";
                 $params[] = $month;
                 $types .= 's';
             }
-
             $where_sql = count($where_clauses) > 0 ? 'WHERE ' . implode(' AND ', $where_clauses) : '';
-
             $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM expenses $where_sql");
             if ($types) {
                 $stmt->bind_param($types, ...$params);
@@ -656,7 +603,6 @@ if (isset($_GET['action'])) {
             $stmt->execute();
             $total_items = $stmt->get_result()->fetch_assoc()['total'];
             $stmt->close();
-
             $sql = "SELECT * FROM expenses $where_sql ORDER BY expense_date DESC LIMIT ? OFFSET ?";
             $stmt = $conn->prepare($sql);
             if ($types) {
@@ -672,7 +618,6 @@ if (isset($_GET['action'])) {
                 $expenses[] = $row;
             }
             $stmt->close();
-
             $monthly_total = 0;
             if ($month) {
                 $stmt_total = $conn->prepare("SELECT SUM(amount) AS total_amount FROM expenses WHERE DATE_FORMAT(expense_date, '%Y-%m') = ?");
@@ -685,10 +630,8 @@ if (isset($_GET['action'])) {
                     return $sum + $item['amount'];
                 }, 0);
             }
-
             echo json_encode(['success' => true, 'expenses' => $expenses, 'total_items' => $total_items, 'monthly_total' => $monthly_total]);
             exit();
-
         case 'get_report_data_json':
             if (!isAdmin()) {
                 echo json_encode(['success' => false, 'message' => 'Unauthorized']);
@@ -701,7 +644,6 @@ if (isset($_GET['action'])) {
                     $selected_date = $_GET['date'] ?? date('Y-m-d');
                     $start_of_day = $selected_date . ' 00:00:00';
                     $end_of_day = $selected_date . ' 23:59:59';
-
                     $stmt = $conn->prepare("SELECT s.total, s.discount, si.quantity FROM sales s JOIN sale_items si ON s.id = si.sale_id WHERE s.sale_date BETWEEN ? AND ?");
                     $stmt->bind_param('ss', $start_of_day, $end_of_day);
                     $stmt->execute();
@@ -711,12 +653,10 @@ if (isset($_GET['action'])) {
                         $daily_sales[] = $row;
                     }
                     $stmt->close();
-
                     $total_sales = array_sum(array_column($daily_sales, 'total'));
                     $total_items_sold = array_sum(array_column($daily_sales, 'quantity'));
                     $total_discount_applied = array_sum(array_column($daily_sales, 'discount'));
                     $num_sales = count(array_unique(array_column($daily_sales, 'total')));
-
                     $report_data['table_html'] = "
                         <tr><td>Date</td><td>" . html($selected_date) . "</td><td></td></tr>
                         <tr><td>Total Sales</td><td>" . format_currency($total_sales) . "</td><td></td></tr>
@@ -740,27 +680,21 @@ if (isset($_GET['action'])) {
                         ['Metric' => 'Total Discount Applied', 'Value' => format_currency($total_discount_applied)],
                     ];
                     break;
-
                 case 'sales-weekly':
                     $selected_month_str = $_GET['month'] ?? date('Y-m');
                     $year = (int)substr($selected_month_str, 0, 4);
                     $month = (int)substr($selected_month_str, 5, 2);
-
                     $first_day_of_month = new DateTime("$year-$month-01");
                     $last_day_of_month = new DateTime("$year-$month-" . $first_day_of_month->format('t'));
-
                     $week_starts = [];
                     $current_week_start = clone $first_day_of_month;
-                    // Adjust to the first Sunday (or actual first day) of the week containing the first day of the month
                     $current_week_start->modify('last sunday');
                     if ($current_week_start > $first_day_of_month && (int)$current_week_start->format('m') === $month && (int)$current_week_start->format('d') > (int)$first_day_of_month->format('d')) {
-                        // If last sunday is in current month but after first day, use first day of month as week start
-                         $current_week_start = clone $first_day_of_month;
+                        $current_week_start = clone $first_day_of_month;
                     }
-                    if((int)$current_week_start->format('m') < $month){ // If it's a previous month's sunday
-                         $current_week_start = clone $first_day_of_month;
+                    if ((int)$current_week_start->format('m') < $month) {
+                        $current_week_start = clone $first_day_of_month;
                     }
-
                     while ($current_week_start <= $last_day_of_month || (int)$current_week_start->format('m') === $month) {
                         $week_end = clone $current_week_start;
                         $week_end->modify('+6 days');
@@ -768,8 +702,6 @@ if (isset($_GET['action'])) {
                         $week_starts[$week_key] = ['start' => clone $current_week_start, 'end' => clone $week_end, 'total' => 0, 'count' => 0, 'items' => 0];
                         $current_week_start->modify('+7 days');
                     }
-
-
                     $sales = [];
                     $stmt = $conn->prepare("SELECT s.total, si.quantity, s.sale_date FROM sales s JOIN sale_items si ON s.id = si.sale_id WHERE s.sale_date BETWEEN ? AND ?");
                     $stmt->bind_param('ss', $first_day_of_month->format('Y-m-d 00:00:00'), $last_day_of_month->format('Y-m-d 23:59:59'));
@@ -779,7 +711,6 @@ if (isset($_GET['action'])) {
                         $sales[] = $row;
                     }
                     $stmt->close();
-
                     foreach ($sales as $sale) {
                         $sale_date = new DateTime($sale['sale_date']);
                         foreach ($week_starts as $key => &$week_data) {
@@ -791,7 +722,6 @@ if (isset($_GET['action'])) {
                             }
                         }
                     }
-
                     $html = '';
                     $chart_labels = [];
                     $chart_data_sales = [];
@@ -802,7 +732,6 @@ if (isset($_GET['action'])) {
                         $chart_data_sales[] = $data['total'];
                         $raw_data_array[] = ['Metric' => $key, 'Value' => format_currency($data['total']) . " (" . $data['count'] . " sales, " . $data['items'] . " items)"];
                     }
-
                     $report_data['table_html'] = $html ?: `<tr><td colspan="3">No weekly sales found for ` . html($selected_month_str) . `.</td></tr>`;
                     $report_data['chart_data'] = [
                         'labels' => $chart_labels,
@@ -814,14 +743,12 @@ if (isset($_GET['action'])) {
                     ];
                     $report_data['raw_data'] = $raw_data_array;
                     break;
-
                 case 'sales-monthly':
                     $selected_month_str = $_GET['month'] ?? date('Y-m');
                     $year = (int)substr($selected_month_str, 0, 4);
                     $month = (int)substr($selected_month_str, 5, 2);
                     $start_of_month = $selected_month_str . '-01 00:00:00';
                     $end_of_month = date('Y-m-t', strtotime($selected_month_str)) . ' 23:59:59';
-
                     $stmt = $conn->prepare("SELECT s.total, s.discount, si.quantity FROM sales s JOIN sale_items si ON s.id = si.sale_id WHERE s.sale_date BETWEEN ? AND ?");
                     $stmt->bind_param('ss', $start_of_month, $end_of_month);
                     $stmt->execute();
@@ -831,12 +758,10 @@ if (isset($_GET['action'])) {
                         $monthly_sales[] = $row;
                     }
                     $stmt->close();
-
                     $total_sales = array_sum(array_column($monthly_sales, 'total'));
                     $total_items_sold = array_sum(array_column($monthly_sales, 'quantity'));
                     $total_discount_applied = array_sum(array_column($monthly_sales, 'discount'));
                     $num_sales = count(array_unique(array_column($monthly_sales, 'total')));
-
                     $report_data['table_html'] = "
                         <tr><td>Month</td><td>" . html($selected_month_str) . "</td><td></td></tr>
                         <tr><td>Total Sales</td><td>" . format_currency($total_sales) . "</td><td></td></tr>
@@ -860,7 +785,6 @@ if (isset($_GET['action'])) {
                         ['Metric' => 'Total Discount Applied', 'Value' => format_currency($total_discount_applied)],
                     ];
                     break;
-
                 case 'best-selling':
                     $stmt = $conn->prepare("SELECT b.title, b.author, SUM(si.quantity) AS total_quantity_sold, SUM((si.price_per_unit * si.quantity) - si.discount_per_unit) AS total_revenue 
                                             FROM sale_items si 
@@ -875,7 +799,6 @@ if (isset($_GET['action'])) {
                         $best_selling_books[] = $row;
                     }
                     $stmt->close();
-
                     $html = '';
                     $chart_labels = [];
                     $chart_data_sales = [];
@@ -888,7 +811,6 @@ if (isset($_GET['action'])) {
                         $chart_data_revenue[] = $book['total_revenue'];
                         $raw_data_array[] = ['Rank' => $index + 1, 'Title' => $book['title'], 'Units Sold' => $book['total_quantity_sold'], 'Revenue' => format_currency($book['total_revenue'])];
                     }
-
                     $report_data['table_html'] = $html ?: '<tr><td colspan="3">No sales data to generate best-selling report.</td></tr>';
                     $report_data['chart_data'] = [
                         'labels' => $chart_labels,
@@ -901,7 +823,6 @@ if (isset($_GET['action'])) {
                     ];
                     $report_data['raw_data'] = $raw_data_array;
                     break;
-
                 case 'best-selling-authors':
                     $stmt = $conn->prepare("SELECT b.author, SUM(si.quantity) AS total_quantity_sold, SUM((si.price_per_unit * si.quantity) - si.discount_per_unit) AS total_revenue 
                                             FROM sale_items si 
@@ -916,7 +837,6 @@ if (isset($_GET['action'])) {
                         $best_selling_authors[] = $row;
                     }
                     $stmt->close();
-
                     $html = '';
                     $chart_labels = [];
                     $chart_data_sales = [];
@@ -929,7 +849,6 @@ if (isset($_GET['action'])) {
                         $chart_data_revenue[] = $author['total_revenue'];
                         $raw_data_array[] = ['Rank' => $index + 1, 'Author' => $author['author'], 'Units Sold' => $author['total_quantity_sold'], 'Revenue' => format_currency($author['total_revenue'])];
                     }
-
                     $report_data['table_html'] = $html ?: '<tr><td colspan="3">No sales data to generate best-selling author report.</td></tr>';
                     $report_data['chart_data'] = [
                         'labels' => $chart_labels,
@@ -942,7 +861,6 @@ if (isset($_GET['action'])) {
                     ];
                     $report_data['raw_data'] = $raw_data_array;
                     break;
-
                 case 'low-stock':
                     $stmt = $conn->prepare("SELECT title, author, stock, isbn FROM books WHERE stock < 5 ORDER BY stock ASC");
                     $stmt->execute();
@@ -952,7 +870,6 @@ if (isset($_GET['action'])) {
                         $low_stock_books[] = $row;
                     }
                     $stmt->close();
-
                     $html = '';
                     $chart_labels = [];
                     $chart_data_stock = [];
@@ -963,7 +880,6 @@ if (isset($_GET['action'])) {
                         $chart_data_stock[] = $book['stock'];
                         $raw_data_array[] = ['Rank' => $index + 1, 'Title' => $book['title'], 'Author' => $book['author'], 'Stock' => $book['stock'], 'ISBN' => $book['isbn']];
                     }
-
                     $report_data['table_html'] = $html ?: '<tr><td colspan="3">No books currently low in stock.</td></tr>';
                     $report_data['chart_data'] = [
                         'labels' => $chart_labels,
@@ -975,12 +891,10 @@ if (isset($_GET['action'])) {
                     ];
                     $report_data['raw_data'] = $raw_data_array;
                     break;
-
                 case 'expenses-summary':
                     $selected_month_str = $_GET['month'] ?? date('Y-m');
                     $start_of_month = $selected_month_str . '-01 00:00:00';
                     $end_of_month = date('Y-m-t', strtotime($selected_month_str)) . ' 23:59:59';
-
                     $stmt = $conn->prepare("SELECT category, SUM(amount) AS total_amount FROM expenses WHERE expense_date BETWEEN ? AND ? GROUP BY category ORDER BY total_amount DESC");
                     $stmt->bind_param('ss', $start_of_month, $end_of_month);
                     $stmt->execute();
@@ -992,7 +906,6 @@ if (isset($_GET['action'])) {
                         $total_expenses += $row['total_amount'];
                     }
                     $stmt->close();
-
                     $html = '';
                     $chart_labels = [];
                     $chart_data_amounts = [];
@@ -1004,7 +917,6 @@ if (isset($_GET['action'])) {
                         $raw_data_array[] = ['Metric' => $expense['category'], 'Value' => format_currency($expense['total_amount'])];
                     }
                     $html .= "<tr><td><strong>Total</strong></td><td></td><td><strong>" . format_currency($total_expenses) . "</strong></td></tr>";
-
                     $report_data['table_html'] = $html ?: '<tr><td colspan="3">No expenses recorded for ' . html($selected_month_str) . '.</td></tr>';
                     $report_data['chart_data'] = [
                         'labels' => $chart_labels,
@@ -1019,22 +931,18 @@ if (isset($_GET['action'])) {
             }
             echo json_encode(['success' => true, 'report_data' => $report_data]);
             exit();
-
         default:
             echo json_encode(['success' => false, 'message' => 'Invalid action.']);
             exit();
     }
 }
-
 if (isset($_POST['action']) && isLoggedIn()) {
     $action = $_POST['action'];
     $message_type = 'error';
     $message = 'An unknown error occurred.';
-
     switch ($action) {
-        case 'login': // This action is handled outside the isLoggedIn() check
+        case 'login':
             break;
-
         case 'save_book':
             if (!isAdmin()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
@@ -1051,7 +959,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
             $stock = $_POST['stock'];
             $description = $_POST['description'] ?? null;
             $cover_image_path = $_POST['existing_cover_image'] ?? null;
-
             if (empty($title) || empty($author) || empty($isbn) || empty($price) || !isset($stock)) {
                 $message = 'All required book fields must be filled.';
                 break;
@@ -1064,18 +971,14 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $message = 'Invalid stock quantity.';
                 break;
             }
-
             if (isset($_FILES['cover_image']) && $_FILES['cover_image']['error'] === UPLOAD_ERR_OK) {
                 $file_tmp_name = $_FILES['cover_image']['tmp_name'];
                 $file_ext = strtolower(pathinfo($_FILES['cover_image']['name'], PATHINFO_EXTENSION));
                 $allowed_ext = ['jpg', 'jpeg', 'png', 'gif'];
-
                 if (in_array($file_ext, $allowed_ext)) {
                     $new_file_name = uniqid('cover_') . '.' . $file_ext;
                     $destination = UPLOAD_DIR . $new_file_name;
-
                     if (move_uploaded_file($file_tmp_name, $destination)) {
-                        // If there was an old image and a new one is uploaded, delete the old one
                         if ($cover_image_path && file_exists($cover_image_path)) {
                             unlink($cover_image_path);
                         }
@@ -1094,7 +997,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 }
                 $cover_image_path = null;
             }
-
             if ($book_id) {
                 $stmt = $conn->prepare("UPDATE books SET title=?, author=?, category=?, isbn=?, publisher=?, year=?, price=?, stock=?, description=?, cover_image=? WHERE id=?");
                 $stmt->bind_param("sssssidddsi", $title, $author, $category, $isbn, $publisher, $year, $price, $stock, $description, $cover_image_path, $book_id);
@@ -1117,7 +1019,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $stmt->close();
             }
             break;
-
         case 'delete_book':
             if (!isAdmin()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
@@ -1125,35 +1026,29 @@ if (isset($_POST['action']) && isLoggedIn()) {
             }
             $book_id = $_POST['book_id'] ?? null;
             if ($book_id) {
-                // Check for dependencies
                 $sales_check_stmt = $conn->prepare("SELECT COUNT(*) FROM sale_items WHERE book_id = ?");
                 $sales_check_stmt->bind_param('i', $book_id);
                 $sales_check_stmt->execute();
                 $has_sales = $sales_check_stmt->get_result()->fetch_row()[0] > 0;
                 $sales_check_stmt->close();
-
                 $po_check_stmt = $conn->prepare("SELECT COUNT(*) FROM po_items WHERE book_id = ?");
                 $po_check_stmt->bind_param('i', $book_id);
                 $po_check_stmt->execute();
                 $has_pos = $po_check_stmt->get_result()->fetch_row()[0] > 0;
                 $po_check_stmt->close();
-
                 if ($has_sales || $has_pos) {
                     $message = 'Cannot delete book with existing sales or purchase orders.';
                     break;
                 }
-
                 $stmt = $conn->prepare("SELECT cover_image FROM books WHERE id = ?");
                 $stmt->bind_param('i', $book_id);
                 $stmt->execute();
                 $result = $stmt->get_result();
                 $book = $result->fetch_assoc();
                 $stmt->close();
-
                 if ($book && $book['cover_image'] && file_exists($book['cover_image'])) {
                     unlink($book['cover_image']);
                 }
-
                 $stmt = $conn->prepare("DELETE FROM books WHERE id=?");
                 $stmt->bind_param("i", $book_id);
                 if ($stmt->execute()) {
@@ -1167,7 +1062,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $message = 'Book ID not provided.';
             }
             break;
-
         case 'update_stock':
             if (!isAdmin() && !isStaff()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
@@ -1175,12 +1069,10 @@ if (isset($_POST['action']) && isLoggedIn()) {
             }
             $book_id = $_POST['book_id'] ?? null;
             $quantity_to_add = $_POST['quantity_to_add'] ?? null;
-
             if (empty($book_id) || !is_numeric($quantity_to_add) || $quantity_to_add <= 0) {
                 $message = 'Invalid input for restock.';
                 break;
             }
-
             $stmt = $conn->prepare("UPDATE books SET stock = stock + ? WHERE id = ?");
             $stmt->bind_param("ii", $quantity_to_add, $book_id);
             if ($stmt->execute()) {
@@ -1191,19 +1083,16 @@ if (isset($_POST['action']) && isLoggedIn()) {
             }
             $stmt->close();
             break;
-
         case 'save_customer':
             $customer_id = $_POST['customer_id'] ?? null;
             $name = $_POST['name'];
             $phone = $_POST['phone'] ?? null;
             $email = $_POST['email'] ?? null;
             $address = $_POST['address'] ?? null;
-
             if (empty($name)) {
                 $message = 'Customer name is required.';
                 break;
             }
-
             if ($email) {
                 $stmt_check = $conn->prepare("SELECT id FROM customers WHERE email = ? AND id != ?");
                 $stmt_check->bind_param('si', $email, $customer_id);
@@ -1215,7 +1104,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 }
                 $stmt_check->close();
             }
-
             if ($customer_id) {
                 $stmt = $conn->prepare("UPDATE customers SET name=?, phone=?, email=?, address=? WHERE id=?");
                 $stmt->bind_param("ssssi", $name, $phone, $email, $address, $customer_id);
@@ -1238,11 +1126,9 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $stmt->close();
             }
             break;
-
         case 'toggle_customer_status':
             $customer_id = $_POST['customer_id'] ?? null;
             $current_status = filter_var($_POST['current_status'], FILTER_VALIDATE_BOOLEAN);
-
             if ($customer_id) {
                 $new_status = !$current_status;
                 $stmt = $conn->prepare("UPDATE customers SET is_active=? WHERE id=?");
@@ -1258,7 +1144,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $message = 'Customer ID not provided.';
             }
             break;
-
         case 'save_supplier':
             if (!isAdmin()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
@@ -1270,12 +1155,10 @@ if (isset($_POST['action']) && isLoggedIn()) {
             $phone = $_POST['phone'] ?? null;
             $email = $_POST['email'] ?? null;
             $address = $_POST['address'] ?? null;
-
             if (empty($name)) {
                 $message = 'Supplier name is required.';
                 break;
             }
-
             if ($email) {
                 $stmt_check = $conn->prepare("SELECT id FROM suppliers WHERE email = ? AND id != ?");
                 $stmt_check->bind_param('si', $email, $supplier_id);
@@ -1287,7 +1170,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 }
                 $stmt_check->close();
             }
-
             if ($supplier_id) {
                 $stmt = $conn->prepare("UPDATE suppliers SET name=?, contact_person=?, phone=?, email=?, address=? WHERE id=?");
                 $stmt->bind_param("sssssi", $name, $contact_person, $phone, $email, $address, $supplier_id);
@@ -1310,7 +1192,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $stmt->close();
             }
             break;
-
         case 'delete_supplier':
             if (!isAdmin()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
@@ -1318,7 +1199,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
             }
             $supplier_id = $_POST['supplier_id'] ?? null;
             if ($supplier_id) {
-                // Check for dependencies
                 $stmt_check = $conn->prepare("SELECT COUNT(*) FROM purchase_orders WHERE supplier_id = ?");
                 $stmt_check->bind_param('i', $supplier_id);
                 $stmt_check->execute();
@@ -1328,7 +1208,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                     break;
                 }
                 $stmt_check->close();
-
                 $stmt = $conn->prepare("DELETE FROM suppliers WHERE id=?");
                 $stmt->bind_param("i", $supplier_id);
                 if ($stmt->execute()) {
@@ -1342,7 +1221,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $message = 'Supplier ID not provided.';
             }
             break;
-
         case 'save_po':
             if (!isAdmin()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
@@ -1355,17 +1233,14 @@ if (isset($_POST['action']) && isLoggedIn()) {
             $status = $_POST['status'];
             $po_items_json = $_POST['po_items'] ?? '[]';
             $po_items = json_decode($po_items_json, true);
-
             if (empty($supplier_id) || empty($order_date) || empty($po_items)) {
                 $message = 'All required PO fields and items must be provided.';
                 break;
             }
-
             $total_cost = 0;
             foreach ($po_items as $item) {
                 $total_cost += $item['quantity'] * $item['unitCost'];
             }
-
             if ($po_id) {
                 $conn->begin_transaction();
                 try {
@@ -1374,19 +1249,16 @@ if (isset($_POST['action']) && isLoggedIn()) {
                     $stmt->bind_param("iisssdi", $supplier_id, $user_id, $status, $order_date, $expected_date, $total_cost, $po_id);
                     $stmt->execute();
                     $stmt->close();
-
                     $stmt = $conn->prepare("DELETE FROM po_items WHERE po_id=?");
                     $stmt->bind_param("i", $po_id);
                     $stmt->execute();
                     $stmt->close();
-
                     $stmt = $conn->prepare("INSERT INTO po_items (po_id, book_id, quantity, cost_per_unit) VALUES (?, ?, ?, ?)");
                     foreach ($po_items as $item) {
                         $stmt->bind_param("iiid", $po_id, $item['bookId'], $item['quantity'], $item['unitCost']);
                         $stmt->execute();
                     }
                     $stmt->close();
-
                     $conn->commit();
                     $message_type = 'success';
                     $message = 'Purchase Order updated successfully!';
@@ -1403,14 +1275,12 @@ if (isset($_POST['action']) && isLoggedIn()) {
                     $stmt->execute();
                     $po_id = $conn->insert_id;
                     $stmt->close();
-
                     $stmt = $conn->prepare("INSERT INTO po_items (po_id, book_id, quantity, cost_per_unit) VALUES (?, ?, ?, ?)");
                     foreach ($po_items as $item) {
                         $stmt->bind_param("iiid", $po_id, $item['bookId'], $item['quantity'], $item['unitCost']);
                         $stmt->execute();
                     }
                     $stmt->close();
-
                     $conn->commit();
                     $message_type = 'success';
                     $message = 'Purchase Order created successfully!';
@@ -1420,7 +1290,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 }
             }
             break;
-
         case 'delete_po':
             if (!isAdmin()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
@@ -1441,7 +1310,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $message = 'PO ID not provided.';
             }
             break;
-
         case 'receive_po':
             if (!isAdmin()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
@@ -1456,7 +1324,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                     $stmt->execute();
                     $current_status = $stmt->get_result()->fetch_assoc()['status'] ?? null;
                     $stmt->close();
-
                     if ($current_status !== 'received') {
                         $stmt_items = $conn->prepare("SELECT book_id, quantity FROM po_items WHERE po_id = ?");
                         $stmt_items->bind_param('i', $po_id);
@@ -1469,12 +1336,10 @@ if (isset($_POST['action']) && isLoggedIn()) {
                             $stmt_update_stock->close();
                         }
                         $stmt_items->close();
-
                         $stmt_update_po = $conn->prepare("UPDATE purchase_orders SET status = 'received' WHERE id = ?");
                         $stmt_update_po->bind_param('i', $po_id);
                         $stmt_update_po->execute();
                         $stmt_update_po->close();
-
                         $conn->commit();
                         $message_type = 'success';
                         $message = 'Purchase Order received and book stock updated!';
@@ -1489,57 +1354,47 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $message = 'PO ID not provided.';
             }
             break;
-
         case 'complete_sale':
             $customer_id = $_POST['customer_id'] ?? null;
             $promotion_code = $_POST['promotion_code'] ?? null;
             $cart_items_json = $_POST['cart_items'] ?? '[]';
             $cart_items = json_decode($cart_items_json, true);
-
             if (empty($cart_items)) {
                 $message = 'Cart is empty, cannot complete sale.';
                 break;
             }
-
             $conn->begin_transaction();
             try {
                 $subtotal = 0;
                 $total_discount = 0;
-
-                // Validate stock and get base prices
                 foreach ($cart_items as &$cart_item) {
                     $stmt_book = $conn->prepare("SELECT stock, price, category FROM books WHERE id = ?");
                     $stmt_book->bind_param("i", $cart_item['bookId']);
                     $stmt_book->execute();
                     $book_data = $stmt_book->get_result()->fetch_assoc();
                     $stmt_book->close();
-
                     if (!$book_data || $book_data['stock'] < $cart_item['quantity']) {
                         throw new Exception("Not enough stock for " . html($cart_item['title']) . ". Available: " . ($book_data['stock'] ?? 0) . ", Needed: " . $cart_item['quantity'] . ".");
                     }
                     $subtotal += $book_data['price'] * $cart_item['quantity'];
                     $cart_item['price_per_unit'] = $book_data['price'];
-                    $cart_item['discount_per_unit'] = 0; // Initialize discount for each item
-                    $cart_item['category'] = $book_data['category']; // Store category for promo check
+                    $cart_item['discount_per_unit'] = 0;
+                    $cart_item['category'] = $book_data['category'];
                 }
-                unset($cart_item); // Break the reference
-
-                // Apply promotion if any
+                unset($cart_item);
                 if ($promotion_code) {
                     $stmt_promo = $conn->prepare("SELECT * FROM promotions WHERE code = ? AND start_date <= CURDATE() AND (end_date IS NULL OR end_date >= CURDATE())");
                     $stmt_promo->bind_param("s", $promotion_code);
                     $stmt_promo->execute();
                     $promotion = $stmt_promo->get_result()->fetch_assoc();
                     $stmt_promo->close();
-
                     if ($promotion) {
                         if ($promotion['applies_to'] === 'all') {
                             $discount_amount = ($promotion['type'] === 'percentage') ? ($subtotal * ($promotion['value'] / 100)) : $promotion['value'];
                             $total_discount = min($discount_amount, $subtotal);
-                            // Distribute discount proportionally among items (simplified)
                             foreach ($cart_items as &$cart_item) {
                                 $item_subtotal_proportion = ($cart_item['price_per_unit'] * $cart_item['quantity']) / $subtotal;
-                                $cart_item['discount_per_unit'] = ($total_discount * $item_subtotal_proportion); // Discount per item's value
+                                $cart_item['discount_per_unit'] = ($total_discount * $item_subtotal_proportion);
                             }
                             unset($cart_item);
                         } else if ($promotion['applies_to'] === 'specific-book') {
@@ -1564,46 +1419,38 @@ if (isset($_POST['action']) && isLoggedIn()) {
                             unset($cart_item);
                         }
                     } else {
-                        $promotion_code = null; // No valid promotion applied
+                        $promotion_code = null;
                     }
                 }
-
                 $final_total = $subtotal - $total_discount;
-                $final_total = max(0, $final_total); // Ensure total is not negative
-
-                // Insert sale record
+                $final_total = max(0, $final_total);
                 $stmt_sale = $conn->prepare("INSERT INTO sales (customer_id, user_id, subtotal, discount, total, promotion_code) VALUES (?, ?, ?, ?, ?, ?)");
                 $user_id = $_SESSION['user_id'];
                 $stmt_sale->bind_param("iiddds", $customer_id, $user_id, $subtotal, $total_discount, $final_total, $promotion_code);
                 $stmt_sale->execute();
                 $sale_id = $conn->insert_id;
                 $stmt_sale->close();
-
-                // Insert sale items and update stock
                 $stmt_sale_item = $conn->prepare("INSERT INTO sale_items (sale_id, book_id, quantity, price_per_unit, discount_per_unit) VALUES (?, ?, ?, ?, ?)");
                 $stmt_update_stock = $conn->prepare("UPDATE books SET stock = stock - ? WHERE id = ?");
                 foreach ($cart_items as $item) {
-                    $stmt_sale_item->bind_param("iiidd", $sale_id, $item['bookId'], $item['quantity'], $item['price_per_unit'], $item['discount_per_unit'] / $item['quantity']); // Store discount per unit
+                    $stmt_sale_item->bind_param("iiidd", $sale_id, $item['bookId'], $item['quantity'], $item['price_per_unit'], $item['discount_per_unit'] / $item['quantity']);
                     $stmt_sale_item->execute();
-
                     $stmt_update_stock->bind_param("ii", $item['quantity'], $item['bookId']);
                     $stmt_update_stock->execute();
                 }
                 $stmt_sale_item->close();
                 $stmt_update_stock->close();
-
                 $conn->commit();
-                $_SESSION['cart'] = []; // Clear cart after successful sale
-                $_SESSION['applied_promotion'] = null; // Clear applied promotion
+                $_SESSION['cart'] = [];
+                $_SESSION['applied_promotion'] = null;
                 $message_type = 'success';
                 $message = 'Sale completed successfully!';
-                $_SESSION['last_sale_id'] = $sale_id; // Store sale ID for receipt display
+                $_SESSION['last_sale_id'] = $sale_id;
             } catch (Exception $e) {
                 $conn->rollback();
                 $message = 'Sale failed: ' . $e->getMessage();
             }
             break;
-
         case 'save_promotion':
             if (!isAdmin()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
@@ -1617,7 +1464,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
             $applies_to_value = $_POST['applies_to_value'] ?? null;
             $start_date = $_POST['start_date'];
             $end_date = $_POST['end_date'] ?? null;
-
             if (empty($code) || empty($type) || empty($value) || empty($applies_to) || empty($start_date)) {
                 $message = 'All required promotion fields must be filled.';
                 break;
@@ -1630,7 +1476,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $message = 'Percentage discount cannot exceed 100%.';
                 break;
             }
-
             if ($applies_to === 'specific-book' && empty($_POST['promotion_book_id'])) {
                 $message = 'Please select a book for this promotion.';
                 break;
@@ -1639,7 +1484,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $message = 'Please enter a category for this promotion.';
                 break;
             }
-
             if ($applies_to === 'specific-book') {
                 $applies_to_value = $_POST['promotion_book_id'];
             } elseif ($applies_to === 'specific-category') {
@@ -1647,7 +1491,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
             } else {
                 $applies_to_value = null;
             }
-
             $stmt_check = $conn->prepare("SELECT id FROM promotions WHERE code = ? AND id != ?");
             $stmt_check->bind_param('si', $code, $promotion_id);
             $stmt_check->execute();
@@ -1657,7 +1500,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 break;
             }
             $stmt_check->close();
-
             if ($promotion_id) {
                 $stmt = $conn->prepare("UPDATE promotions SET code=?, type=?, value=?, applies_to=?, applies_to_value=?, start_date=?, end_date=? WHERE id=?");
                 $stmt->bind_param("ssdsissi", $code, $type, $value, $applies_to, $applies_to_value, $start_date, $end_date, $promotion_id);
@@ -1680,7 +1522,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $stmt->close();
             }
             break;
-
         case 'delete_promotion':
             if (!isAdmin()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
@@ -1688,7 +1529,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
             }
             $promotion_id = $_POST['promotion_id'] ?? null;
             if ($promotion_id) {
-                // Check for dependencies
                 $stmt_check = $conn->prepare("SELECT COUNT(*) FROM sales WHERE promotion_code IN (SELECT code FROM promotions WHERE id = ?)");
                 $stmt_check->bind_param('i', $promotion_id);
                 $stmt_check->execute();
@@ -1698,7 +1538,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                     break;
                 }
                 $stmt_check->close();
-
                 $stmt = $conn->prepare("DELETE FROM promotions WHERE id=?");
                 $stmt->bind_param("i", $promotion_id);
                 if ($stmt->execute()) {
@@ -1712,7 +1551,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $message = 'Promotion ID not provided.';
             }
             break;
-
         case 'save_expense':
             if (!isAdmin()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
@@ -1723,7 +1561,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
             $category = $_POST['category'];
             $description = $_POST['description'] ?? null;
             $amount = $_POST['amount'];
-
             if (empty($date) || empty($category) || empty($amount)) {
                 $message = 'All required expense fields must be filled.';
                 break;
@@ -1732,7 +1569,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $message = 'Invalid amount.';
                 break;
             }
-
             if ($expense_id) {
                 $stmt = $conn->prepare("UPDATE expenses SET user_id=?, category=?, description=?, amount=?, expense_date=? WHERE id=?");
                 $user_id = $_SESSION['user_id'];
@@ -1757,7 +1593,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $stmt->close();
             }
             break;
-
         case 'delete_expense':
             if (!isAdmin()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
@@ -1778,48 +1613,39 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $message = 'Expense ID not provided.';
             }
             break;
-
         case 'import_books_action':
             if (!isAdmin()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
                 redirect('books');
             }
             $conflict_resolution = $_POST['import_conflict_books'] ?? 'skip';
-
             if (!isset($_FILES['import_books_file']) || $_FILES['import_books_file']['error'] !== UPLOAD_ERR_OK) {
                 $message = 'No file uploaded or an error occurred during upload.';
                 break;
             }
-
             $file_content = file_get_contents($_FILES['import_books_file']['tmp_name']);
             $books_data = json_decode($file_content, true);
-
             if (!is_array($books_data)) {
                 $message = 'Invalid JSON file. Expected an array of books.';
                 break;
             }
-
             $new_count = 0;
             $updated_count = 0;
             $skipped_count = 0;
-
             $conn->begin_transaction();
             try {
                 $stmt_insert = $conn->prepare("INSERT INTO books (title, author, category, isbn, publisher, year, price, stock, description, cover_image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
                 $stmt_update = $conn->prepare("UPDATE books SET title=?, author=?, category=?, publisher=?, year=?, price=?, stock=?, description=?, cover_image=? WHERE isbn=?");
-
                 foreach ($books_data as $book) {
                     if (!isset($book['isbn']) || !isset($book['title']) || !isset($book['author']) || !isset($book['price']) || !isset($book['stock'])) {
                         $skipped_count++;
                         continue;
                     }
-
                     $stmt_check = $conn->prepare("SELECT id FROM books WHERE isbn = ?");
                     $stmt_check->bind_param("s", $book['isbn']);
                     $stmt_check->execute();
                     $existing_book_id = $stmt_check->get_result()->fetch_assoc()['id'] ?? null;
                     $stmt_check->close();
-
                     if ($existing_book_id) {
                         if ($conflict_resolution === 'update') {
                             $stmt_update->bind_param(
@@ -1868,48 +1694,39 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $message = 'Error during book import: ' . $e->getMessage();
             }
             break;
-
         case 'import_customers_action':
             if (!isAdmin()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
                 redirect('customers');
             }
             $conflict_resolution = $_POST['import_conflict_customers'] ?? 'skip';
-
             if (!isset($_FILES['import_customers_file']) || $_FILES['import_customers_file']['error'] !== UPLOAD_ERR_OK) {
                 $message = 'No file uploaded or an error occurred during upload.';
                 break;
             }
-
             $file_content = file_get_contents($_FILES['import_customers_file']['tmp_name']);
             $customers_data = json_decode($file_content, true);
-
             if (!is_array($customers_data)) {
                 $message = 'Invalid JSON file. Expected an array of customers.';
                 break;
             }
-
             $new_count = 0;
             $updated_count = 0;
             $skipped_count = 0;
-
             $conn->begin_transaction();
             try {
                 $stmt_insert = $conn->prepare("INSERT INTO customers (name, phone, email, address, is_active) VALUES (?, ?, ?, ?, ?)");
                 $stmt_update = $conn->prepare("UPDATE customers SET name=?, phone=?, address=?, is_active=? WHERE email=?");
-
                 foreach ($customers_data as $customer) {
                     if (!isset($customer['name']) || !isset($customer['email'])) {
                         $skipped_count++;
                         continue;
                     }
-
                     $stmt_check = $conn->prepare("SELECT id FROM customers WHERE email = ?");
                     $stmt_check->bind_param("s", $customer['email']);
                     $stmt_check->execute();
                     $existing_customer_id = $stmt_check->get_result()->fetch_assoc()['id'] ?? null;
                     $stmt_check->close();
-
                     if ($existing_customer_id) {
                         if ($conflict_resolution === 'update') {
                             $stmt_update->bind_param(
@@ -1948,48 +1765,39 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $message = 'Error during customer import: ' . $e->getMessage();
             }
             break;
-
         case 'import_suppliers_action':
             if (!isAdmin()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
                 redirect('suppliers');
             }
             $conflict_resolution = $_POST['import_conflict_suppliers'] ?? 'skip';
-
             if (!isset($_FILES['import_suppliers_file']) || $_FILES['import_suppliers_file']['error'] !== UPLOAD_ERR_OK) {
                 $message = 'No file uploaded or an error occurred during upload.';
                 break;
             }
-
             $file_content = file_get_contents($_FILES['import_suppliers_file']['tmp_name']);
             $suppliers_data = json_decode($file_content, true);
-
             if (!is_array($suppliers_data)) {
                 $message = 'Invalid JSON file. Expected an array of suppliers.';
                 break;
             }
-
             $new_count = 0;
             $updated_count = 0;
             $skipped_count = 0;
-
             $conn->begin_transaction();
             try {
                 $stmt_insert = $conn->prepare("INSERT INTO suppliers (name, contact_person, phone, email, address) VALUES (?, ?, ?, ?, ?)");
                 $stmt_update = $conn->prepare("UPDATE suppliers SET name=?, contact_person=?, phone=?, address=? WHERE email=?");
-
                 foreach ($suppliers_data as $supplier) {
                     if (!isset($supplier['name']) || !isset($supplier['email'])) {
                         $skipped_count++;
                         continue;
                     }
-
                     $stmt_check = $conn->prepare("SELECT id FROM suppliers WHERE email = ?");
                     $stmt_check->bind_param("s", $supplier['email']);
                     $stmt_check->execute();
                     $existing_supplier_id = $stmt_check->get_result()->fetch_assoc()['id'] ?? null;
                     $stmt_check->close();
-
                     if ($existing_supplier_id) {
                         if ($conflict_resolution === 'update') {
                             $stmt_update->bind_param(
@@ -2028,7 +1836,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $message = 'Error during supplier import: ' . $e->getMessage();
             }
             break;
-
         case 'export_all_data':
             if (!isAdmin()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
@@ -2044,53 +1851,40 @@ if (isset($_POST['action']) && isLoggedIn()) {
                     error_log("Failed to fetch data for table: " . $table . " - " . $conn->error);
                 }
             }
-
             header('Content-Type: application/json');
             header('Content-Disposition: attachment; filename="bookshop_data_backup_' . date('Y-m-d') . '.json"');
             echo json_encode($all_data, JSON_PRETTY_PRINT);
             exit();
-
         case 'import_all_data':
             if (!isAdmin()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
                 redirect('backup-restore');
             }
-
             if (!isset($_FILES['import_file']) || $_FILES['import_file']['error'] !== UPLOAD_ERR_OK) {
                 $message = 'No file uploaded or an error occurred during upload.';
                 break;
             }
-
             $file_content = file_get_contents($_FILES['import_file']['tmp_name']);
             $imported_data = json_decode($file_content, true);
-
             if (!is_array($imported_data)) {
                 $message = 'Invalid JSON file. Expected an object with table data.';
                 break;
             }
-
             $tables_in_order = ['users', 'books', 'customers', 'suppliers', 'promotions', 'expenses', 'purchase_orders', 'po_items', 'sales', 'sale_items'];
-            $tables_delete_order = array_reverse($tables_in_order); // Delete in reverse dependency order
-
+            $tables_delete_order = array_reverse($tables_in_order);
             $conn->begin_transaction();
             try {
-                $conn->query("SET FOREIGN_KEY_CHECKS = 0"); // Disable FK checks for mass import/delete
-
+                $conn->query("SET FOREIGN_KEY_CHECKS = 0");
                 foreach ($tables_delete_order as $table) {
                     $conn->query("TRUNCATE TABLE " . $table);
                 }
-
                 foreach ($tables_in_order as $table) {
                     if (isset($imported_data[$table]) && is_array($imported_data[$table])) {
                         if (empty($imported_data[$table])) continue;
-
                         $columns = array_keys($imported_data[$table][0]);
                         $placeholders = implode(', ', array_fill(0, count($columns), '?'));
                         $column_names = implode(', ', $columns);
-
                         $stmt = $conn->prepare("INSERT INTO " . $table . " (" . $column_names . ") VALUES (" . $placeholders . ")");
-                        
-                        // Determine parameter types dynamically
                         $types = '';
                         foreach ($columns as $col) {
                             $sample_value = $imported_data[$table][0][$col];
@@ -2099,12 +1893,11 @@ if (isset($_POST['action']) && isLoggedIn()) {
                             } elseif (is_float($sample_value)) {
                                 $types .= 'd';
                             } elseif (is_bool($sample_value)) {
-                                $types .= 'i'; // Treat boolean as integer (0 or 1)
+                                $types .= 'i';
                             } else {
                                 $types .= 's';
                             }
                         }
-
                         foreach ($imported_data[$table] as $row) {
                             $values = [];
                             foreach ($columns as $col) {
@@ -2121,8 +1914,7 @@ if (isset($_POST['action']) && isLoggedIn()) {
                         $stmt->close();
                     }
                 }
-
-                $conn->query("SET FOREIGN_KEY_CHECKS = 1"); // Re-enable FK checks
+                $conn->query("SET FOREIGN_KEY_CHECKS = 1");
                 $conn->commit();
                 $message_type = 'success';
                 $message = 'All data imported successfully!';
@@ -2132,7 +1924,6 @@ if (isset($_POST['action']) && isLoggedIn()) {
                 $message = 'Error during data import: ' . $e->getMessage();
             }
             break;
-
         default:
             $message = 'Invalid action.';
             break;
@@ -2140,19 +1931,15 @@ if (isset($_POST['action']) && isLoggedIn()) {
     $_SESSION['toast'] = ['type' => $message_type, 'message' => $message];
     redirect($_GET['page'] ?? 'dashboard');
 }
-
-// Login action (handled before general isLoggedIn() check)
 if (isset($_POST['action']) && $_POST['action'] === 'login') {
     $username = $_POST['username'] ?? '';
     $password = $_POST['password'] ?? '';
-
     $stmt = $conn->prepare("SELECT id, username, password_hash, role FROM users WHERE username = ?");
     $stmt->bind_param("s", $username);
     $stmt->execute();
     $result = $stmt->get_result();
     $user = $result->fetch_assoc();
     $stmt->close();
-
     if ($user && password_verify($password, $user['password_hash'])) {
         session_regenerate_id(true);
         $_SESSION['user_id'] = $user['id'];
@@ -2165,25 +1952,34 @@ if (isset($_POST['action']) && $_POST['action'] === 'login') {
         redirect('login');
     }
 }
-
-// Logout action
-if (isset($_GET['action']) && $_GET['action'] === 'logout') {
-    session_destroy();
-    session_start();
-    $_SESSION['toast'] = ['type' => 'info', 'message' => 'You have been logged out.'];
-    redirect('login');
+if (isset($_POST['action']) && $_POST['action'] === 'customer_login') {
+    $email = $_POST['email'] ?? '';
+    $phone = $_POST['phone'] ?? '';
+    $stmt = $conn->prepare("SELECT id, name, phone FROM customers WHERE email = ? AND is_active = 1");
+    $stmt->bind_param("s", $email);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $customer = $result->fetch_assoc();
+    $stmt->close();
+    if ($customer && $phone === $customer['phone']) {
+        session_regenerate_id(true);
+        $_SESSION['customer_id'] = $customer['id'];
+        $_SESSION['customer_name'] = $customer['name'];
+        $_SESSION['user_role'] = 'customer';
+        $_SESSION['toast'] = ['type' => 'success', 'message' => 'Welcome, ' . html($customer['name']) . '!'];
+        redirect('customer-dashboard');
+    } else {
+        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Invalid email or phone number.'];
+        redirect('customer-login');
+    }
 }
-
-// Initial setup: Create admin/staff users and sample data if no users exist
 $stmt = $conn->prepare("SELECT COUNT(*) FROM users");
 $stmt->execute();
 $user_count = $stmt->get_result()->fetch_row()[0];
 $stmt->close();
-
 if ($user_count == 0) {
     $admin_password = password_hash('admin123', PASSWORD_BCRYPT);
     $staff_password = password_hash('staff123', PASSWORD_BCRYPT);
-
     $conn->begin_transaction();
     try {
         $stmt = $conn->prepare("INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'admin')");
@@ -2191,16 +1987,12 @@ if ($user_count == 0) {
         $stmt->execute();
         $admin_user_id = $conn->insert_id;
         $stmt->close();
-
         $stmt = $conn->prepare("INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'staff')");
         $stmt->bind_param("ss", $username = 'staff', $staff_password);
         $stmt->execute();
         $staff_user_id = $conn->insert_id;
         $stmt->close();
-
-        // Use the new admin_user_id for sample data if session is not set
-        $current_system_user_id = $admin_user_id; 
-
+        $current_system_user_id = $admin_user_id;
         $sampleBooks = [
             ['title' => 'The Alchemist', 'author' => 'Paulo Coelho', 'category' => 'Fiction', 'isbn' => '978-0061122415', 'publisher' => 'HarperOne', 'year' => 1988, 'price' => 850.00, 'stock' => 12, 'description' => 'A philosophical novel about a young shepherd boy named Santiago who journeys to find a treasure.', 'cover_image' => ''],
             ['title' => 'Sapiens: A Brief History of Humankind', 'author' => 'Yuval Noah Harari', 'category' => 'History', 'isbn' => '978-0062316097', 'publisher' => 'Harper Perennial', 'year' => 2014, 'price' => 1200.00, 'stock' => 7, 'description' => 'Explores the history of humanity from the Stone Age to the twenty-first century.', 'cover_image' => ''],
@@ -2217,7 +2009,6 @@ if ($user_count == 0) {
             $book_ids[] = $conn->insert_id;
         }
         $stmt->close();
-
         $sampleCustomers = [
             ['name' => 'Ali Khan', 'phone' => '03001234567', 'email' => 'ali.khan@example.com', 'address' => 'Street 5, Sector G-8, Islamabad', 'is_active' => 1],
             ['name' => 'Sara Ahmed', 'phone' => '03337654321', 'email' => 'sara.ahmed@example.com', 'address' => 'House 12, Gulberg III, Lahore', 'is_active' => 1],
@@ -2232,7 +2023,6 @@ if ($user_count == 0) {
             $customer_ids[] = $conn->insert_id;
         }
         $stmt->close();
-
         $sampleSuppliers = [
             ['name' => 'ABC Publishers', 'contact_person' => 'Zain Ali', 'phone' => '021-34567890', 'email' => 'info@abcpubs.com', 'address' => 'D-34, Main Boulevard, Karachi'],
             ['name' => 'Global Books Distributors', 'contact_person' => 'Maria Khan', 'phone' => '042-12345678', 'email' => 'sales@globalbooks.pk', 'address' => 'Model Town, Lahore'],
@@ -2247,44 +2037,45 @@ if ($user_count == 0) {
             $supplier_ids[] = $conn->insert_id;
         }
         $stmt->close();
-
         $sale_timestamp1 = time() - (2 * 24 * 60 * 60);
         $sale_timestamp2 = time() - (10 * 24 * 60 * 60);
         $sale_timestamp3 = time() - (15 * 24 * 60 * 60);
         $sale_timestamp4 = time();
-
         $sale_items1 = [
             ['book_id' => $book_ids[0], 'quantity' => 1, 'price_per_unit' => 850.00, 'discount_per_unit' => 0],
             ['book_id' => $book_ids[1], 'quantity' => 1, 'price_per_unit' => 1200.00, 'discount_per_unit' => 0],
         ];
-        $subtotal1 = array_reduce($sale_items1, function ($sum, $item) { return $sum + ($item['price_per_unit'] * $item['quantity']); }, 0);
+        $subtotal1 = array_reduce($sale_items1, function ($sum, $item) {
+            return $sum + ($item['price_per_unit'] * $item['quantity']);
+        }, 0);
         $total1 = $subtotal1;
-
         $sale_items2 = [
             ['book_id' => $book_ids[4], 'quantity' => 2, 'price_per_unit' => 950.00, 'discount_per_unit' => 0],
         ];
-        $subtotal2 = array_reduce($sale_items2, function ($sum, $item) { return $sum + ($item['price_per_unit'] * $item['quantity']); }, 0);
+        $subtotal2 = array_reduce($sale_items2, function ($sum, $item) {
+            return $sum + ($item['price_per_unit'] * $item['quantity']);
+        }, 0);
         $total2 = $subtotal2;
-
         $sale_items3 = [
             ['book_id' => $book_ids[3], 'quantity' => 1, 'price_per_unit' => 600.00, 'discount_per_unit' => 0],
         ];
-        $subtotal3 = array_reduce($sale_items3, function ($sum, $item) { return $sum + ($item['price_per_unit'] * $item['quantity']); }, 0);
+        $subtotal3 = array_reduce($sale_items3, function ($sum, $item) {
+            return $sum + ($item['price_per_unit'] * $item['quantity']);
+        }, 0);
         $total3 = $subtotal3;
-
         $sale_items4 = [
             ['book_id' => $book_ids[2], 'quantity' => 1, 'price_per_unit' => 700.00, 'discount_per_unit' => 0],
         ];
-        $subtotal4 = array_reduce($sale_items4, function ($sum, $item) { return $sum + ($item['price_per_unit'] * $item['quantity']); }, 0);
+        $subtotal4 = array_reduce($sale_items4, function ($sum, $item) {
+            return $sum + ($item['price_per_unit'] * $item['quantity']);
+        }, 0);
         $total4 = $subtotal4;
-
         $sales_data = [
             ['customer_id' => $customer_ids[0], 'user_id' => $current_system_user_id, 'subtotal' => $subtotal1, 'discount' => 0, 'total' => $total1, 'promotion_code' => null, 'sale_date' => date('Y-m-d H:i:s', $sale_timestamp1), 'items' => $sale_items1],
             ['customer_id' => $customer_ids[1], 'user_id' => $current_system_user_id, 'subtotal' => $subtotal2, 'discount' => 0, 'total' => $total2, 'promotion_code' => null, 'sale_date' => date('Y-m-d H:i:s', $sale_timestamp2), 'items' => $sale_items2],
             ['customer_id' => null, 'user_id' => $current_system_user_id, 'subtotal' => $subtotal3, 'discount' => 0, 'total' => $total3, 'promotion_code' => null, 'sale_date' => date('Y-m-d H:i:s', $sale_timestamp3), 'items' => $sale_items3],
             ['customer_id' => $customer_ids[0], 'user_id' => $current_system_user_id, 'subtotal' => $subtotal4, 'discount' => 0, 'total' => $total4, 'promotion_code' => null, 'sale_date' => date('Y-m-d H:i:s', $sale_timestamp4), 'items' => $sale_items4],
         ];
-
         $stmt_sale = $conn->prepare("INSERT INTO sales (customer_id, user_id, subtotal, discount, total, promotion_code, sale_date) VALUES (?, ?, ?, ?, ?, ?, ?)");
         $stmt_sale_item = $conn->prepare("INSERT INTO sale_items (sale_id, book_id, quantity, price_per_unit, discount_per_unit) VALUES (?, ?, ?, ?, ?)");
         foreach ($sales_data as $sale) {
@@ -2298,29 +2089,27 @@ if ($user_count == 0) {
         }
         $stmt_sale->close();
         $stmt_sale_item->close();
-
         $po_date1 = date('Y-m-d', time() - (7 * 24 * 60 * 60));
         $expected_date1 = date('Y-m-d', time() + (7 * 24 * 60 * 60));
         $po_date2 = date('Y-m-d', time() - (30 * 24 * 60 * 60));
         $received_date2 = date('Y-m-d', time() - (20 * 24 * 60 * 60));
-
         $po_items1 = [
             ['book_id' => $book_ids[5], 'quantity' => 10, 'cost_per_unit' => 750 * 0.7],
             ['book_id' => $book_ids[0], 'quantity' => 5, 'cost_per_unit' => 850 * 0.7],
         ];
-        $po_cost1 = array_reduce($po_items1, function ($sum, $item) { return $sum + ($item['cost_per_unit'] * $item['quantity']); }, 0);
-
+        $po_cost1 = array_reduce($po_items1, function ($sum, $item) {
+            return $sum + ($item['cost_per_unit'] * $item['quantity']);
+        }, 0);
         $po_items2 = [
             ['book_id' => $book_ids[3], 'quantity' => 15, 'cost_per_unit' => 600 * 0.6],
         ];
-        $po_cost2 = array_reduce($po_items2, function ($sum, $item) { return $sum + ($item['cost_per_unit'] * $item['quantity']); }, 0);
-
-
+        $po_cost2 = array_reduce($po_items2, function ($sum, $item) {
+            return $sum + ($item['cost_per_unit'] * $item['quantity']);
+        }, 0);
         $purchase_orders_data = [
             ['supplier_id' => $supplier_ids[0], 'user_id' => $current_system_user_id, 'status' => 'ordered', 'order_date' => $po_date1, 'expected_date' => $expected_date1, 'total_cost' => $po_cost1, 'items' => $po_items1],
             ['supplier_id' => $supplier_ids[1], 'user_id' => $current_system_user_id, 'status' => 'received', 'order_date' => $po_date2, 'expected_date' => $received_date2, 'total_cost' => $po_cost2, 'items' => $po_items2],
         ];
-
         $stmt_po = $conn->prepare("INSERT INTO purchase_orders (supplier_id, user_id, status, order_date, expected_date, total_cost) VALUES (?, ?, ?, ?, ?, ?)");
         $stmt_po_item = $conn->prepare("INSERT INTO po_items (po_id, book_id, quantity, cost_per_unit) VALUES (?, ?, ?, ?)");
         foreach ($purchase_orders_data as $po) {
@@ -2334,12 +2123,10 @@ if ($user_count == 0) {
         }
         $stmt_po->close();
         $stmt_po_item->close();
-
         $expense_date1 = date('Y-m-d', time() - (3 * 24 * 60 * 60));
         $expense_date2 = date('Y-m-d', time() - (15 * 24 * 60 * 60));
         $expense_date3 = date('Y-m-d', time() - (20 * 24 * 60 * 60));
         $expense_date4 = date('Y-m-d');
-
         $sampleExpenses = [
             ['user_id' => $current_system_user_id, 'category' => 'Utilities', 'description' => 'Electricity bill for July', 'amount' => 8500.00, 'expense_date' => $expense_date1],
             ['user_id' => $current_system_user_id, 'category' => 'Rent', 'description' => 'Monthly shop rent', 'amount' => 50000.00, 'expense_date' => $expense_date2],
@@ -2352,7 +2139,6 @@ if ($user_count == 0) {
             $stmt->execute();
         }
         $stmt->close();
-
         $conn->commit();
         $_SESSION['toast'] = ['type' => 'info', 'message' => 'Initial data (users, books, customers, etc.) added to the database.'];
     } catch (Exception $e) {
@@ -2361,34 +2147,29 @@ if ($user_count == 0) {
         $_SESSION['toast'] = ['type' => 'error', 'message' => 'Failed to set up initial data: ' . $e->getMessage()];
     }
 }
-
-// Initialize cart if not set
 if (!isset($_SESSION['cart'])) {
     $_SESSION['cart'] = [];
 }
-
-// Determine current page for rendering
-$page = $_GET['page'] ?? 'home'; // Default to 'home' for public access
-
-// Handle redirection for logged-in users trying to access login page
-if (isLoggedIn() && ($page === 'login' || $page === 'home')) {
-    redirect('dashboard');
+$page = $_GET['page'] ?? 'home';
+if (isLoggedIn()) {
+    if (($page === 'login' || $page === 'customer-login' || $page === 'home')) {
+        redirect(isCustomer() ? 'customer-dashboard' : 'dashboard');
+    }
 }
-
-// Redirect to login if not logged in and trying to access authenticated pages
-$authenticated_pages = ['dashboard', 'books', 'customers', 'suppliers', 'purchase-orders', 'cart', 'sales-history', 'promotions', 'expenses', 'reports', 'backup-restore'];
+$admin_pages = ['dashboard', 'books', 'customers', 'suppliers', 'purchase-orders', 'cart', 'sales-history', 'promotions', 'expenses', 'reports', 'backup-restore'];
+if (isCustomer() && in_array($page, $admin_pages)) {
+    redirect('customer-dashboard');
+}
+$authenticated_pages = ['dashboard', 'books', 'customers', 'suppliers', 'purchase-orders', 'cart', 'sales-history', 'promotions', 'expenses', 'reports', 'backup-restore', 'customer-dashboard'];
 if (!isLoggedIn() && in_array($page, $authenticated_pages)) {
-    $_SESSION['toast'] = ['type' => 'info', 'message' => 'Please log in to access the system.'];
-    redirect('login');
+    $_SESSION['toast'] = ['type' => 'info', 'message' => 'Please log in to access this page.'];
+    $redirect_page = ($page === 'customer-dashboard') ? 'customer-login' : 'login';
+    redirect($redirect_page);
 }
-
-// MySQL Console Commands for Database Setup and Sample Data (as requested)
-// These are not executed by the PHP script, but provided as an output.
 /*
 -- Database Creation
 CREATE DATABASE IF NOT EXISTS bookshop_management;
 USE bookshop_management;
-
 -- Table Structure
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -2397,7 +2178,6 @@ CREATE TABLE IF NOT EXISTS users (
     role ENUM('admin', 'staff') NOT NULL DEFAULT 'staff',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
 CREATE TABLE IF NOT EXISTS books (
     id INT AUTO_INCREMENT PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
@@ -2413,7 +2193,6 @@ CREATE TABLE IF NOT EXISTS books (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
-
 CREATE TABLE IF NOT EXISTS customers (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
@@ -2424,7 +2203,6 @@ CREATE TABLE IF NOT EXISTS customers (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
-
 CREATE TABLE IF NOT EXISTS suppliers (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
@@ -2435,7 +2213,6 @@ CREATE TABLE IF NOT EXISTS suppliers (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
-
 CREATE TABLE IF NOT EXISTS purchase_orders (
     id INT AUTO_INCREMENT PRIMARY KEY,
     supplier_id INT NOT NULL,
@@ -2449,7 +2226,6 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
     FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE RESTRICT,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
 );
-
 CREATE TABLE IF NOT EXISTS po_items (
     id INT AUTO_INCREMENT PRIMARY KEY,
     po_id INT NOT NULL,
@@ -2459,7 +2235,6 @@ CREATE TABLE IF NOT EXISTS po_items (
     FOREIGN KEY (po_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
     FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE RESTRICT
 );
-
 CREATE TABLE IF NOT EXISTS promotions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     code VARCHAR(50) NOT NULL UNIQUE,
@@ -2472,7 +2247,6 @@ CREATE TABLE IF NOT EXISTS promotions (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
-
 CREATE TABLE IF NOT EXISTS sales (
     id INT AUTO_INCREMENT PRIMARY KEY,
     customer_id INT, -- NULL for guest sales
@@ -2486,7 +2260,6 @@ CREATE TABLE IF NOT EXISTS sales (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
     FOREIGN KEY (promotion_code) REFERENCES promotions(code) ON DELETE SET NULL
 );
-
 CREATE TABLE IF NOT EXISTS sale_items (
     id INT AUTO_INCREMENT PRIMARY KEY,
     sale_id INT NOT NULL,
@@ -2497,7 +2270,6 @@ CREATE TABLE IF NOT EXISTS sale_items (
     FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
     FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE RESTRICT
 );
-
 CREATE TABLE IF NOT EXISTS expenses (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL, -- User who recorded the expense
@@ -2523,6 +2295,8 @@ CREATE TABLE IF NOT EXISTS expenses (
     <title>Bookshop Management</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%232a9d8f' d='M18 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2m-1 15H7V5h10v12M9 7h6v2H9V7m0 4h6v2H9v-2m0 4h6v2H9v-2z'/%3E%3C/svg%3E" type="image/svg+xml">
     <style>
+        @import url("https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css");
+
         :root {
             --primary-color: #2a9d8f;
             --primary-dark-color: #218579;
@@ -2587,7 +2361,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             overflow: hidden;
         }
 
-        /* Public site specific styles */
         #public-site-container {
             flex-direction: column;
             box-shadow: none;
@@ -2778,7 +2551,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             margin: 0;
             font-size: 0.9em;
         }
-
 
         aside.sidebar {
             width: 250px;
@@ -3261,8 +3033,7 @@ CREATE TABLE IF NOT EXISTS expenses (
         #toast-container {
             position: fixed;
             top: 20px;
-        <?php echo !isLoggedIn() ? 'left: 50%; transform: translateX(-50%);' : 'right: 20px;'; ?>
-            z-index: 1001;
+            <?php echo !isLoggedIn() ? 'left: 50%; transform: translateX(-50%);' : 'right: 20px;'; ?>z-index: 1001;
             display: flex;
             flex-direction: column;
             gap: 10px;
@@ -3275,8 +3046,7 @@ CREATE TABLE IF NOT EXISTS expenses (
             border-radius: 8px;
             box-shadow: 0 4px 12px var(--shadow-color);
             opacity: 0;
-        <?php echo !isLoggedIn() ? 'transform: translateY(-100%);' : 'transform: translateX(100%);'; ?>
-            transition: opacity 0.3s ease, transform 0.3s ease;
+            <?php echo !isLoggedIn() ? 'transform: translateY(-100%);' : 'transform: translateX(100%);'; ?>transition: opacity 0.3s ease, transform 0.3s ease;
             display: flex;
             align-items: center;
             gap: 10px;
@@ -3285,7 +3055,7 @@ CREATE TABLE IF NOT EXISTS expenses (
 
         .toast.show {
             opacity: 1;
-        <?php echo !isLoggedIn() ? 'transform: translateY(0);' : 'transform: translateX(0);'; ?>
+            <?php echo !isLoggedIn() ? 'transform: translateY(0);' : 'transform: translateX(0);'; ?>
         }
 
         .toast.success {
@@ -3706,31 +3476,46 @@ CREATE TABLE IF NOT EXISTS expenses (
         .hamburger-menu {
             display: none;
         }
-
-        @import url("https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css");
     </style>
 </head>
 
 <body>
-    <?php if ($page === 'login') : ?>
+    <?php if ($page === 'login' || $page === 'customer-login') : ?>
         <div id="login-container">
             <div class="login-card">
-                <h2>Bookshop Manager Login</h2>
-                <form action="index.php" method="POST">
-                    <input type="hidden" name="action" value="login">
-                    <div class="form-group">
-                        <label for="username">Username</label>
-                        <input type="text" id="username" name="username" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="password">Password</label>
-                        <input type="password" id="password" name="password" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary">Login</button>
-                </form>
+                <?php if ($page === 'login') : ?>
+                    <h2>Bookshop Manager Login</h2>
+                    <form action="index.php" method="POST">
+                        <input type="hidden" name="action" value="login">
+                        <div class="form-group">
+                            <label for="username">Username</label>
+                            <input type="text" id="username" name="username" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="password">Password</label>
+                            <input type="password" id="password" name="password" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Login</button>
+                    </form>
+                <?php else :
+                ?>
+                    <h2>Customer Login</h2>
+                    <form action="index.php" method="POST">
+                        <input type="hidden" name="action" value="customer_login">
+                        <div class="form-group">
+                            <label for="email">Email</label>
+                            <input type="email" id="email" name="email" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="phone">Phone Number (as Password)</label>
+                            <input type="tel" id="phone" name="phone" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Login</button>
+                    </form>
+                <?php endif; ?>
             </div>
         </div>
-    <?php elseif (!isLoggedIn() && in_array($page, ['home', 'books-public', 'about', 'contact'])) : // Public pages 
+    <?php elseif (in_array($page, ['home', 'books-public', 'about', 'contact', 'customer-dashboard'])) :
     ?>
         <div id="public-site-container">
             <header class="public-header">
@@ -3743,7 +3528,15 @@ CREATE TABLE IF NOT EXISTS expenses (
                         <li><a href="index.php?page=contact" class="nav-link <?php echo $page === 'contact' ? 'active' : ''; ?>">Contact Us</a></li>
                     </ul>
                 </nav>
-                <a href="index.php?page=login" class="login-btn">Login to Admin</a>
+                <div style="display: flex; gap: 15px; align-items: center;">
+                    <?php if (isCustomer()) : ?>
+                        <a href="index.php?page=customer-dashboard" class="login-btn">My Dashboard</a>
+                        <a href="index.php?action=logout" style="color: white; font-weight: 500;">Logout</a>
+                    <?php else : ?>
+                        <a href="index.php?page=customer-login" style="color: white; font-weight: 500;">Customer Login</a>
+                        <a href="index.php?page=login" class="login-btn">Admin Login</a>
+                    <?php endif; ?>
+                </div>
             </header>
             <main class="public-content">
                 <?php
@@ -3860,6 +3653,42 @@ CREATE TABLE IF NOT EXISTS expenses (
                         </section>
                     <?php
                         break;
+                    case 'customer-dashboard':
+                    ?>
+                        <section id="customer-dashboard" class="page-content active">
+                            <div class="page-header" style="justify-content: space-between; width:100%;">
+                                <h1>Welcome, <?php echo html($_SESSION['customer_name']); ?>!</h1>
+                                <a href="index.php?action=logout" class="btn btn-danger">Logout</a>
+                            </div>
+                            <div class="card">
+                                <div class="card-header">My Profile</div>
+                                <div id="customer-profile-details">
+                                    <p>Loading your details...</p>
+                                </div>
+                            </div>
+                            <div class="card" style="margin-top: 20px;">
+                                <div class="card-header">My Purchase History</div>
+                                <div class="table-responsive">
+                                    <table class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Sale ID</th>
+                                                <th>Date</th>
+                                                <th>Items</th>
+                                                <th>Total</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="customer-dashboard-history-list">
+                                            <tr>
+                                                <td colspan="4">Loading purchase history...</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </section>
+                    <?php
+                        break;
                     case 'contact':
                     ?>
                         <section id="public-contact" class="page-content active">
@@ -3889,11 +3718,9 @@ CREATE TABLE IF NOT EXISTS expenses (
                                 <p>We look forward to hearing from you!</p>
                             </div>
                         </section>
-                    <?php
+                <?php
                         break;
                     default:
-                        // This should ideally not be reached if $page is properly handled.
-                        // For safety, redirect to home.
                         redirect('home');
                         break;
                 }
@@ -3927,7 +3754,7 @@ CREATE TABLE IF NOT EXISTS expenses (
                     </ul>
                 </nav>
                 <div class="user-info">
-                    Logged in as <span><?php echo html($_SESSION['username']); ?> (<?php echo html($_SESSION['user_role']); ?>)</span><br>
+                    Logged in as <span><?php echo html(isCustomer() ? $_SESSION['customer_name'] : $_SESSION['username']); ?> (<?php echo html($_SESSION['user_role']); ?>)</span><br>
                     <a href="index.php?action=logout">Logout</a>
                 </div>
                 <div class="dark-mode-toggle">
@@ -3956,7 +3783,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                         $stmt_today_sales->execute();
                         $today_sales_total = $stmt_today_sales->get_result()->fetch_row()[0] ?? 0;
                         $stmt_today_sales->close();
-
                         $recent_sales_query = "SELECT s.id, s.sale_date, c.name AS customer_name, s.total, 
                                             GROUP_CONCAT(CONCAT(b.title, ' (', si.quantity, ')') SEPARATOR ', ') AS item_titles
                                             FROM sales s
@@ -3972,7 +3798,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                                 $recent_sales[] = $row;
                             }
                         }
-
                         $low_stock_books_query = "SELECT id, title, author, stock FROM books WHERE stock < 5 ORDER BY stock ASC";
                         $low_stock_books_result = $conn->query($low_stock_books_query);
                         $low_stock_books = [];
@@ -4671,8 +4496,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                 <?php
                         break;
                     default:
-                        // This should ideally not be reached if logged in.
-                        // For safety, redirect to dashboard.
                         redirect('dashboard');
                         break;
                 }
@@ -5249,19 +5072,16 @@ CREATE TABLE IF NOT EXISTS expenses (
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
-        // Helper function for HTML escaping, replicating PHP's html()
         function html(text) {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
         }
-
         const PAGE_SIZE = 10;
         let currentCart = <?php echo json_encode($_SESSION['cart']); ?>;
         let appliedPromotion = <?php echo json_encode($_SESSION['applied_promotion'] ?? null); ?>;
         let currentReportData = [];
         let reportChartInstance = null;
-
         const elements = {
             appContainer: document.getElementById('app-container'),
             sidebar: document.querySelector('.sidebar'),
@@ -5270,16 +5090,12 @@ CREATE TABLE IF NOT EXISTS expenses (
             navLinks: document.querySelectorAll('.nav-link'),
             pageContents: document.querySelectorAll('.page-content'),
             toastContainer: document.getElementById('toast-container'),
-
-            // Dashboard elements
             totalBooksCount: document.getElementById('total-books-count'),
             totalCustomersCount: document.getElementById('total-customers-count'),
             lowStockCount: document.getElementById('low-stock-count'),
             todaySalesTotal: document.getElementById('today-sales-total'),
             dashboardRecentSales: document.getElementById('dashboard-recent-sales'),
             dashboardLowStockBooks: document.getElementById('dashboard-low-stock-books'),
-
-            // Books Management elements
             addBookBtn: document.getElementById('add-book-btn'),
             exportBooksBtn: document.getElementById('export-books-btn'),
             importBooksBtn: document.getElementById('import-books-btn'),
@@ -5295,8 +5111,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             importBooksFile: document.getElementById('import-books-file'),
             importBooksSkip: document.getElementById('import-books-skip'),
             importBooksUpdate: document.getElementById('import-books-update'),
-
-            // Customers Management elements
             addCustomerBtn: document.getElementById('add-customer-btn'),
             exportCustomersBtn: document.getElementById('export-customers-btn'),
             importCustomersBtn: document.getElementById('import-customers-btn'),
@@ -5312,8 +5126,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             importCustomersFile: document.getElementById('import-customers-file'),
             importCustomersSkip: document.getElementById('import-customers-skip'),
             importCustomersUpdate: document.getElementById('import-customers-update'),
-
-            // Suppliers Management elements
             addSupplierBtn: document.getElementById('add-supplier-btn'),
             exportSuppliersBtn: document.getElementById('export-suppliers-btn'),
             importSuppliersBtn: document.getElementById('import-suppliers-btn'),
@@ -5328,8 +5140,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             importSuppliersFile: document.getElementById('import-suppliers-file'),
             importSuppliersSkip: document.getElementById('import-suppliers-skip'),
             importSuppliersUpdate: document.getElementById('import-suppliers-update'),
-
-            // Purchase Orders elements
             createPoBtn: document.getElementById('create-po-btn'),
             exportPosBtn: document.getElementById('export-pos-btn'),
             poSearch: document.getElementById('po-search'),
@@ -5339,8 +5149,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             posPrevPage: document.getElementById('pos-prev-page'),
             posNextPage: document.getElementById('pos-next-page'),
             posPageInfo: document.getElementById('pos-page-info'),
-
-            // Cart & Sales elements
             viewSalesHistoryBtn: document.getElementById('view-sales-history-btn'),
             exportSalesBtn: document.getElementById('export-sales-btn'),
             backToCartBtn: document.getElementById('back-to-cart-btn'),
@@ -5361,8 +5169,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             salesNextPage: document.getElementById('sales-next-page'),
             salesPageInfo: document.getElementById('sales-page-info'),
             saleSearch: document.getElementById('sale-search'),
-
-            // Promotions elements
             addPromotionBtn: document.getElementById('add-promotion-btn'),
             promotionsList: document.getElementById('promotions-list'),
             promotionTypePercentage: document.getElementById('promo-type-percentage'),
@@ -5374,8 +5180,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             promotionCategoryGroup: document.getElementById('promotion-category-group'),
             promotionCategory: document.getElementById('promotion-category'),
             bookCategoriesDatalist: document.getElementById('book-categories-datalist'),
-
-            // Expenses elements
             addExpenseBtn: document.getElementById('add-expense-btn'),
             expenseSearch: document.getElementById('expense-search'),
             expenseMonthFilter: document.getElementById('expense-month-filter'),
@@ -5385,8 +5189,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             expensesPrevPage: document.getElementById('expenses-prev-page'),
             expensesNextPage: document.getElementById('expenses-next-page'),
             expensesPageInfo: document.getElementById('expenses-page-info'),
-
-            // Reports elements
             reportType: document.getElementById('report-type'),
             reportDateFilter: document.getElementById('report-date-filter'),
             reportDate: document.getElementById('report-date'),
@@ -5399,13 +5201,9 @@ CREATE TABLE IF NOT EXISTS expenses (
             reportResultsHeader: document.getElementById('report-results-header'),
             reportResultsTable: document.getElementById('report-results-table'),
             reportChart: document.getElementById('report-chart'),
-
-            // Backup & Restore elements
             exportAllDataBtn: document.getElementById('export-all-data-btn'),
             importFile: document.getElementById('import-file'),
             importAllDataBtn: document.getElementById('import-all-data-btn'),
-
-            // Modals
             bookModal: document.getElementById('book-modal'),
             bookModalTitle: document.getElementById('book-modal-title'),
             bookForm: document.getElementById('book-form'),
@@ -5424,14 +5222,12 @@ CREATE TABLE IF NOT EXISTS expenses (
             existingCoverImage: document.getElementById('existing-cover-image'),
             removeCoverImage: document.getElementById('remove-cover-image'),
             removeCoverLabel: document.getElementById('remove-cover-label'),
-
             restockModal: document.getElementById('restock-modal'),
             restockForm: document.getElementById('restock-form'),
             restockBookId: document.getElementById('restock-book-id'),
             restockBookTitle: document.getElementById('restock-book-title'),
             restockCurrentStock: document.getElementById('restock-current-stock'),
             restockQuantity: document.getElementById('restock-quantity'),
-
             customerModal: document.getElementById('customer-modal'),
             customerModalTitle: document.getElementById('customer-modal-title'),
             customerForm: document.getElementById('customer-form'),
@@ -5440,11 +5236,9 @@ CREATE TABLE IF NOT EXISTS expenses (
             customerPhone: document.getElementById('customer-phone'),
             customerEmail: document.getElementById('customer-email'),
             customerAddress: document.getElementById('customer-address'),
-
             customerHistoryModal: document.getElementById('customer-history-modal'),
             customerHistoryTitle: document.getElementById('customer-history-title'),
             customerHistoryList: document.getElementById('customer-history-list'),
-
             supplierModal: document.getElementById('supplier-modal'),
             supplierModalTitle: document.getElementById('supplier-modal-title'),
             supplierForm: document.getElementById('supplier-form'),
@@ -5454,7 +5248,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             supplierPhone: document.getElementById('supplier-phone'),
             supplierEmail: document.getElementById('supplier-email'),
             supplierAddress: document.getElementById('supplier-address'),
-
             purchaseOrderModal: document.getElementById('purchase-order-modal'),
             poModalTitle: document.getElementById('po-modal-title'),
             poForm: document.getElementById('po-form'),
@@ -5469,7 +5262,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             poGrandTotal: document.getElementById('po-grand-total'),
             receivePoBtn: document.getElementById('receive-po-btn'),
             poItemsInput: document.getElementById('po-items-input'),
-
             checkoutModal: document.getElementById('checkout-modal'),
             checkoutForm: document.getElementById('checkout-form'),
             checkoutCustomer: document.getElementById('checkout-customer'),
@@ -5482,7 +5274,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             checkoutCustomerIdInput: document.getElementById('checkout-customer-id-input'),
             checkoutPromotionCodeInput: document.getElementById('checkout-promotion-code-input'),
             checkoutCartItemsInput: document.getElementById('checkout-cart-items-input'),
-
             receiptModal: document.getElementById('receipt-modal'),
             receiptSaleId: document.getElementById('receipt-sale-id'),
             receiptDate: document.getElementById('receipt-date'),
@@ -5494,7 +5285,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             receiptGrandTotal: document.getElementById('receipt-grand-total'),
             printReceiptBtn: document.getElementById('print-receipt-btn'),
             downloadReceiptBtn: document.getElementById('download-receipt-btn'),
-
             viewSaleModal: document.getElementById('view-sale-modal'),
             saleDetailsId: document.getElementById('sale-details-id'),
             saleDetailsDate: document.getElementById('sale-details-date'),
@@ -5505,7 +5295,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             saleDetailsDiscountValue: document.getElementById('sale-details-discount-value'),
             saleDetailsTotal: document.getElementById('sale-details-total'),
             reprintReceiptBtn: document.getElementById('reprint-receipt-btn'),
-
             promotionModal: document.getElementById('promotion-modal'),
             promotionModalTitle: document.getElementById('promotion-modal-title'),
             promotionForm: document.getElementById('promotion-form'),
@@ -5514,7 +5303,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             promotionValue: document.getElementById('promotion-value'),
             promotionStartDate: document.getElementById('promotion-start-date'),
             promotionEndDate: document.getElementById('promotion-end-date'),
-
             expenseModal: document.getElementById('expense-modal'),
             expenseModalTitle: document.getElementById('expense-modal-title'),
             expenseForm: document.getElementById('expense-form'),
@@ -5523,10 +5311,7 @@ CREATE TABLE IF NOT EXISTS expenses (
             expenseCategory: document.getElementById('expense-category'),
             expenseDescription: document.getElementById('expense-description'),
             expenseAmount: document.getElementById('expense-amount'),
-
             modalCloseButtons: document.querySelectorAll('.modal-close'),
-
-            // Public Site elements
             publicBookSearch: document.getElementById('public-book-search'),
             publicBookCategoryFilter: document.getElementById('public-book-category-filter'),
             publicBookSort: document.getElementById('public-book-sort'),
@@ -5536,7 +5321,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             publicBooksNextPage: document.getElementById('public-books-next-page'),
             publicBooksPageInfo: document.getElementById('public-books-page-info'),
         };
-
         const formatCurrency = (amount) => `PKR ${parseFloat(amount).toFixed(2)}`;
         const formatDate = (timestamp) => new Date(timestamp).toLocaleDateString('en-PK', {
             year: 'numeric',
@@ -5574,7 +5358,6 @@ CREATE TABLE IF NOT EXISTS expenses (
         function hideModal(modalElement) {
             modalElement.classList.remove('active');
         }
-
         const pagination = {
             books: {
                 currentPage: 1,
@@ -5654,15 +5437,13 @@ CREATE TABLE IF NOT EXISTS expenses (
             const totalPages = Math.ceil(totalItems / PAGE_SIZE);
             paginationConfig.totalPages = totalPages === 0 ? 1 : totalPages;
             paginationConfig.currentPage = Math.min(paginationConfig.currentPage, paginationConfig.totalPages);
-            if (paginationConfig.currentPage < 1) paginationConfig.currentPage = 1; // Ensure page is at least 1
-
-            if (paginationConfig.elements.info) { // Check if elements exist for the current view
+            if (paginationConfig.currentPage < 1) paginationConfig.currentPage = 1;
+            if (paginationConfig.elements.info) {
                 paginationConfig.elements.info.textContent = `Page ${paginationConfig.currentPage} of ${paginationConfig.totalPages}`;
                 paginationConfig.elements.prev.disabled = paginationConfig.currentPage === 1;
                 paginationConfig.elements.next.disabled = paginationConfig.currentPage === paginationConfig.totalPages;
             }
         }
-
         async function fetchJSON(url) {
             try {
                 const response = await fetch(url);
@@ -5683,20 +5464,13 @@ CREATE TABLE IF NOT EXISTS expenses (
                 };
             }
         }
-
-        // Admin/Staff App Functions
-        async function updateDashboard() {
-            // These counts are directly from PHP on page load, no AJAX needed here unless refreshing specific cards.
-            // If any card needs to be dynamically updated without full page refresh, implement its own AJAX fetch.
-        }
-
+        async function updateDashboard() {}
         async function renderBooks() {
-            if (!elements.booksList) return; // Guard clause for pages where this element doesn't exist
+            if (!elements.booksList) return;
             const search = elements.bookSearch.value;
             const sort = elements.bookSort.value;
             const page = pagination.books.currentPage;
             const data = await fetchJSON(`index.php?action=get_books_json&search=${encodeURIComponent(search)}&sort=${sort}&page_num=${page}`);
-
             if (data.success) {
                 const books = data.books;
                 updatePaginationControls(pagination.books, data.total_items);
@@ -5724,7 +5498,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                 `).join('') : `<tr><td colspan="8">No books found.</td></tr>`;
             }
         }
-
         async function openBookModal(bookId = null) {
             if (!<?php echo isAdmin() ? 'true' : 'false'; ?> && bookId) {
                 showToast('Unauthorized to edit book details.', 'error');
@@ -5739,7 +5512,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             elements.existingCoverImage.value = '';
             elements.removeCoverLabel.style.display = 'none';
             elements.removeCoverImage.checked = false;
-
             if (bookId) {
                 const data = await fetchJSON(`index.php?action=get_books_json&book_id=${bookId}`);
                 if (data.success && data.books.length > 0) {
@@ -5768,7 +5540,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             }
             showModal(elements.bookModal);
         }
-
         async function openRestockModal(bookId, title, stock) {
             elements.restockBookId.value = bookId;
             elements.restockBookTitle.value = title;
@@ -5776,14 +5547,12 @@ CREATE TABLE IF NOT EXISTS expenses (
             elements.restockQuantity.value = 1;
             showModal(elements.restockModal);
         }
-
         async function renderCustomers() {
             if (!elements.customersList) return;
             const search = elements.customerSearch.value;
             const status = elements.customerFilterStatus.value;
             const page = pagination.customers.currentPage;
             const data = await fetchJSON(`index.php?action=get_customers_json&search=${encodeURIComponent(search)}&status=${status}&page_num=${page}`);
-
             if (data.success) {
                 const customers = data.customers;
                 updatePaginationControls(pagination.customers, data.total_items);
@@ -5808,13 +5577,11 @@ CREATE TABLE IF NOT EXISTS expenses (
                 `).join('') : `<tr><td colspan="6">No customers found.</td></tr>`;
             }
         }
-
         async function openCustomerModal(customerId = null) {
-            if (!elements.customerForm) return; // Guard clause
+            if (!elements.customerForm) return;
             elements.customerForm.reset();
             elements.customerId.value = '';
             elements.customerModalTitle.textContent = 'Add New Customer';
-
             if (customerId) {
                 const data = await fetchJSON(`index.php?action=get_customers_json&customer_id=${customerId}`);
                 if (data.success && data.customers.length > 0) {
@@ -5832,12 +5599,10 @@ CREATE TABLE IF NOT EXISTS expenses (
             }
             showModal(elements.customerModal);
         }
-
         async function viewCustomerHistory(customerId, customerName) {
             if (!elements.customerHistoryTitle) return;
             elements.customerHistoryTitle.textContent = `Purchase History for ${html(customerName)}`;
             const data = await fetchJSON(`index.php?action=get_customer_history_json&customer_id=${customerId}`);
-
             if (data.success) {
                 const sales = data.sales;
                 elements.customerHistoryList.innerHTML = sales.length > 0 ? sales.map(sale => `
@@ -5851,13 +5616,11 @@ CREATE TABLE IF NOT EXISTS expenses (
             }
             showModal(elements.customerHistoryModal);
         }
-
         async function renderSuppliers() {
             if (!elements.suppliersList) return;
             const search = elements.supplierSearch.value;
             const page = pagination.suppliers.currentPage;
             const data = await fetchJSON(`index.php?action=get_suppliers_json&search=${encodeURIComponent(search)}&page_num=${page}`);
-
             if (data.success) {
                 const suppliers = data.suppliers;
                 updatePaginationControls(pagination.suppliers, data.total_items);
@@ -5879,7 +5642,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                 `).join('') : `<tr><td colspan="5">No suppliers found.</td></tr>`;
             }
         }
-
         async function openSupplierModal(supplierId = null) {
             if (!elements.supplierForm) return;
             if (!<?php echo isAdmin() ? 'true' : 'false'; ?>) {
@@ -5889,7 +5651,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             elements.supplierForm.reset();
             elements.supplierId.value = '';
             elements.supplierModalTitle.textContent = 'Add New Supplier';
-
             if (supplierId) {
                 const data = await fetchJSON(`index.php?action=get_suppliers_json&supplier_id=${supplierId}`);
                 if (data.success && data.suppliers.length > 0) {
@@ -5908,7 +5669,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             }
             showModal(elements.supplierModal);
         }
-
         let currentPoItems = [];
         async function renderPurchaseOrders() {
             if (!elements.purchaseOrdersList) return;
@@ -5916,7 +5676,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             const status = elements.poStatusFilter.value;
             const page = pagination.purchaseOrders.currentPage;
             const data = await fetchJSON(`index.php?action=get_pos_json&search=${encodeURIComponent(search)}&status=${status}&page_num=${page}`);
-
             if (data.success) {
                 const purchaseOrders = data.purchase_orders;
                 updatePaginationControls(pagination.purchaseOrders, data.total_items);
@@ -5950,7 +5709,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                 `).join('') : `<tr><td colspan="8">No purchase orders found.</td></tr>`;
             }
         }
-
         async function openPurchaseOrderModal(poId = null) {
             if (!elements.poForm) return;
             if (!<?php echo isAdmin() ? 'true' : 'false'; ?>) {
@@ -5968,7 +5726,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             currentPoItems = [];
             renderPoItems();
             elements.receivePoBtn.style.display = 'none';
-
             if (poId) {
                 const data = await fetchJSON(`index.php?action=get_pos_json&po_id=${poId}`);
                 if (data.success && data.purchase_orders.length > 0) {
@@ -5981,7 +5738,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                     elements.poStatus.value = po.status;
                     currentPoItems = JSON.parse(JSON.stringify(po.items));
                     renderPoItems();
-
                     if (po.status === 'ordered') {
                         elements.receivePoBtn.style.display = 'inline-flex';
                         elements.receivePoBtn.onclick = () => {
@@ -6013,7 +5769,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             }
             showModal(elements.purchaseOrderModal);
         }
-
         async function searchBooksForPo(query) {
             if (!elements.poBookSearchResults) return;
             elements.poBookSearchResults.innerHTML = '';
@@ -6021,9 +5776,8 @@ CREATE TABLE IF NOT EXISTS expenses (
                 return;
             }
             const data = await fetchJSON(`index.php?action=get_books_json&search=${encodeURIComponent(query)}&limit=5`);
-
             if (data.success) {
-                const filteredBooks = data.books; // Already limited to 5
+                const filteredBooks = data.books;
                 filteredBooks.forEach(book => {
                     const div = document.createElement('div');
                     div.textContent = `${html(book.title)} by ${html(book.author)} (ISBN: ${html(book.isbn)})`;
@@ -6042,7 +5796,7 @@ CREATE TABLE IF NOT EXISTS expenses (
                     bookId: book.id,
                     title: book.title,
                     quantity: 1,
-                    unitCost: parseFloat((book.price * 0.7).toFixed(2)), // Default cost_per_unit to 70% of sale price
+                    unitCost: parseFloat((book.price * 0.7).toFixed(2)),
                 });
             }
             elements.poBookSearch.value = '';
@@ -6093,13 +5847,11 @@ CREATE TABLE IF NOT EXISTS expenses (
             elements.poGrandTotal.textContent = formatCurrency(totalCost);
             elements.poItemsInput.value = JSON.stringify(currentPoItems);
         }
-
         async function renderBooksForCart() {
             if (!elements.booksForCartList) return;
             const search = elements.bookToCartSearch.value;
             const page = pagination.booksForCart.currentPage;
             const data = await fetchJSON(`index.php?action=get_books_for_cart_json&search=${encodeURIComponent(search)}&page_num=${page}`);
-
             if (data.success) {
                 const books = data.books;
                 updatePaginationControls(pagination.booksForCart, data.total_items);
@@ -6120,7 +5872,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                 }).join('') : `<tr><td colspan="5">No books found to add to cart.</td></tr>`;
             }
         }
-
         async function addToCart(bookId, title, price) {
             const data = await fetchJSON(`index.php?action=get_books_json&book_id=${bookId}`);
             if (!data.success || data.books.length === 0) {
@@ -6130,12 +5881,10 @@ CREATE TABLE IF NOT EXISTS expenses (
             const book = data.books[0];
             const existingItemIndex = currentCart.findIndex(item => item.bookId === bookId);
             const currentQuantityInCart = existingItemIndex > -1 ? currentCart[existingItemIndex].quantity : 0;
-
             if (currentQuantityInCart >= book.stock) {
                 showToast(`Cannot add more "${html(title)}". Only ${html(book.stock)} available.`, 'warning');
                 return;
             }
-
             if (existingItemIndex > -1) {
                 currentCart[existingItemIndex].quantity++;
             } else {
@@ -6144,15 +5893,14 @@ CREATE TABLE IF NOT EXISTS expenses (
                     title: title,
                     price: price,
                     quantity: 1,
-                    discount_per_unit: 0, // Initialize discount per unit for cart item
-                    category: book.category // Store category for promo calculation
+                    discount_per_unit: 0,
+                    category: book.category
                 });
             }
             showToast(`"${html(title)}" added to cart.`, 'info');
             renderCart();
             renderBooksForCart();
         }
-
         async function updateCartItemQuantity(bookId, newQuantity) {
             const data = await fetchJSON(`index.php?action=get_books_json&book_id=${bookId}`);
             if (!data.success || data.books.length === 0) {
@@ -6161,7 +5909,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             }
             const book = data.books[0];
             const itemIndex = currentCart.findIndex(item => item.bookId === bookId);
-
             if (itemIndex > -1) {
                 if (newQuantity <= 0) {
                     removeCartItem(bookId);
@@ -6169,7 +5916,7 @@ CREATE TABLE IF NOT EXISTS expenses (
                 }
                 if (newQuantity > book.stock) {
                     showToast(`Cannot add more than available stock (${html(book.stock)}) for "${html(book.title)}".`, 'warning');
-                    currentCart[itemIndex].quantity = book.stock; // Set to max available
+                    currentCart[itemIndex].quantity = book.stock;
                 } else {
                     currentCart[itemIndex].quantity = newQuantity;
                 }
@@ -6184,76 +5931,63 @@ CREATE TABLE IF NOT EXISTS expenses (
             renderCart();
             renderBooksForCart();
         }
-
         async function calculateCartTotals() {
             let subtotal = 0;
             let totalDiscount = 0;
-
-            // First, calculate subtotal and ensure items have correct prices and categories
             for (const item of currentCart) {
                 const data = await fetchJSON(`index.php?action=get_books_json&book_id=${item.bookId}`);
                 if (data.success && data.books.length > 0) {
                     const book = data.books[0];
-                    item.price = book.price; // Ensure current price
-                    item.category = book.category; // Ensure current category
+                    item.price = book.price;
+                    item.category = book.category;
                     subtotal += item.price * item.quantity;
-                    item.discount_per_unit = 0; // Reset item discount before applying promo
+                    item.discount_per_unit = 0;
                 } else {
                     console.error(`Book ID ${item.bookId} not found for cart calculation.`);
                 }
             }
-
             if (appliedPromotion) {
                 if (appliedPromotion.applies_to === 'all') {
                     const discountAmount = appliedPromotion.type === 'percentage' ?
                         subtotal * (appliedPromotion.value / 100) :
                         appliedPromotion.value;
                     totalDiscount = Math.min(discountAmount, subtotal);
-
-                    // Distribute total discount proportionally to each item's value
                     if (subtotal > 0) {
                         for (const item of currentCart) {
                             const itemValue = item.price * item.quantity;
-                            item.discount_per_unit = (totalDiscount * (itemValue / subtotal)) / item.quantity; // Discount amount per unit
+                            item.discount_per_unit = (totalDiscount * (itemValue / subtotal)) / item.quantity;
                         }
                     }
-                } else { // Specific-book or specific-category
+                } else {
                     for (const item of currentCart) {
                         if ((appliedPromotion.applies_to === 'specific-book' && item.bookId == appliedPromotion.applies_to_value) ||
                             (appliedPromotion.applies_to === 'specific-category' && item.category === appliedPromotion.applies_to_value)) {
-
                             const itemTotalPrice = item.price * item.quantity;
                             const discountAmountForItem = appliedPromotion.type === 'percentage' ?
                                 itemTotalPrice * (appliedPromotion.value / 100) :
                                 appliedPromotion.value;
-                            item.discount_per_unit = Math.min(discountAmountForItem / item.quantity, item.price); // Discount per unit, capped at item price
+                            item.discount_per_unit = Math.min(discountAmountForItem / item.quantity, item.price);
                             totalDiscount += (item.discount_per_unit * item.quantity);
                         }
                     }
                 }
             }
-
             let finalTotal = subtotal - totalDiscount;
-            finalTotal = Math.max(0, finalTotal); // Ensure total is not negative
-
+            finalTotal = Math.max(0, finalTotal);
             return {
                 subtotal: subtotal,
                 discount: totalDiscount,
                 total: finalTotal
             };
         }
-
-
         async function renderCart() {
             if (!elements.cartItemsTable) return;
             const {
                 subtotal,
                 discount,
                 total
-            } = await calculateCartTotals(); // Await totals calculation
-
+            } = await calculateCartTotals();
             elements.cartTotalItems.textContent = currentCart.reduce((sum, item) => sum + item.quantity, 0);
-
             if (currentCart.length === 0) {
                 elements.cartItemsTable.innerHTML = `<tr><td colspan="6">Cart is empty.</td></tr>`;
                 elements.clearCartBtn.disabled = true;
@@ -6290,8 +6024,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             if (elements.checkoutDiscount) elements.checkoutDiscount.value = formatCurrency(discount);
             if (elements.checkoutTotal) elements.checkoutTotal.value = formatCurrency(total);
             if (elements.checkoutDiscountDisplay) elements.checkoutDiscountDisplay.style.display = discount > 0 ? 'block' : 'none';
-
-            // Update session cart data
             fetch('index.php?action=update_session_cart', {
                 method: 'POST',
                 headers: {
@@ -6309,17 +6041,15 @@ CREATE TABLE IF NOT EXISTS expenses (
                 console.error('Error updating session cart:', error);
             });
         }
-
         async function openCheckoutModal() {
             if (!elements.checkoutModal) return;
             if (currentCart.length === 0) {
                 showToast('Cart is empty. Please add items to cart before checkout.', 'warning');
                 return;
             }
-            await renderCart(); // Ensure cart totals are up-to-date before showing modal
+            await renderCart();
             showModal(elements.checkoutModal);
         }
-
         async function applyPromotion() {
             if (!elements.checkoutPromotionCode) return;
             const promoCode = elements.checkoutPromotionCode.value.trim();
@@ -6329,7 +6059,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                 showToast('Promotion code cleared.', 'info');
                 return;
             }
-
             const data = await fetchJSON(`index.php?action=get_promotions_json`);
             if (!data.success) {
                 showToast('Failed to fetch promotions.', 'error');
@@ -6342,7 +6071,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                 new Date(p.start_date) <= now &&
                 (!p.end_date || new Date(p.end_date) >= now)
             );
-
             if (promotion) {
                 appliedPromotion = promotion;
                 showToast(`Promotion "${html(promotion.code)}" applied!`, 'success');
@@ -6363,13 +6091,11 @@ CREATE TABLE IF NOT EXISTS expenses (
                 showToast('Cart cleared.', 'info');
             }
         }
-
         async function renderSalesHistory() {
             if (!elements.salesList) return;
             const search = elements.saleSearch.value;
             const page = pagination.sales.currentPage;
             const data = await fetchJSON(`index.php?action=get_sales_json&search=${encodeURIComponent(search)}&page_num=${page}`);
-
             if (data.success) {
                 const sales = data.sales;
                 updatePaginationControls(pagination.sales, data.total_items);
@@ -6387,11 +6113,9 @@ CREATE TABLE IF NOT EXISTS expenses (
                 `).join('') : `<tr><td colspan="6">No sales recorded.</td></tr>`;
             }
         }
-
         async function viewSaleDetails(saleId) {
             if (!elements.viewSaleModal) return;
             const data = await fetchJSON(`index.php?action=get_sale_details_json&sale_id=${saleId}`);
-
             if (data.success) {
                 const sale = data.sale;
                 elements.saleDetailsId.textContent = html(sale.id);
@@ -6399,14 +6123,12 @@ CREATE TABLE IF NOT EXISTS expenses (
                 elements.saleDetailsCustomer.textContent = html(sale.customer_name || 'Guest');
                 elements.saleDetailsSubtotal.textContent = formatCurrency(html(sale.subtotal));
                 elements.saleDetailsTotal.textContent = formatCurrency(html(sale.total));
-
                 if (sale.discount > 0) {
                     elements.saleDetailsDiscountLine.style.display = 'block';
                     elements.saleDetailsDiscountValue.textContent = formatCurrency(html(sale.discount));
                 } else {
                     elements.saleDetailsDiscountLine.style.display = 'none';
                 }
-
                 elements.saleDetailsItems.innerHTML = sale.items.map(item => `
                     <tr>
                         <td>${html(item.title)}</td>
@@ -6416,7 +6138,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                         <td>${formatCurrency((item.price_per_unit * item.quantity) - (item.discount_per_unit * item.quantity))}</td>
                     </tr>
                 `).join('');
-
                 elements.reprintReceiptBtn.onclick = () => {
                     hideModal(elements.viewSaleModal);
                     openReceiptModal(sale);
@@ -6426,7 +6147,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                 showToast('Sale record not found.', 'error');
             }
         }
-
         async function openReceiptModal(sale) {
             if (!elements.receiptModal) return;
             elements.receiptSaleId.textContent = html(sale.id);
@@ -6434,14 +6154,12 @@ CREATE TABLE IF NOT EXISTS expenses (
             elements.receiptCustomer.textContent = html(sale.customer_name || 'Guest');
             elements.receiptSubtotal.textContent = formatCurrency(html(sale.subtotal));
             elements.receiptGrandTotal.textContent = formatCurrency(html(sale.total));
-
             if (sale.discount > 0) {
                 elements.receiptDiscountLine.style.display = 'block';
                 elements.receiptDiscountValue.textContent = formatCurrency(html(sale.discount));
             } else {
                 elements.receiptDiscountLine.style.display = 'none';
             }
-
             elements.receiptItemsList.innerHTML = sale.items.map(item => `
                 <tr>
                     <td style="text-align: left; padding: 2px 0;">${html(item.title)}</td>
@@ -6452,7 +6170,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             `).join('');
             showModal(elements.receiptModal);
         }
-
         async function printReceipt() {
             if (!elements.receiptContent) return;
             const receiptContent = document.getElementById('receipt-content').cloneNode(true);
@@ -6462,7 +6179,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             receiptContent.style.position = 'absolute';
             receiptContent.style.left = '-9999px';
             document.body.appendChild(receiptContent);
-
             html2canvas(receiptContent, {
                 scale: 2
             }).then(canvas => {
@@ -6485,7 +6201,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                 receiptContent.remove();
             });
         }
-
         async function downloadReceiptPdf() {
             if (!elements.receiptContent) return;
             const receiptContent = document.getElementById('receipt-content').cloneNode(true);
@@ -6495,7 +6210,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             receiptContent.style.position = 'absolute';
             receiptContent.style.left = '-9999px';
             document.body.appendChild(receiptContent);
-
             html2canvas(receiptContent, {
                 scale: 2
             }).then(canvas => {
@@ -6518,11 +6232,9 @@ CREATE TABLE IF NOT EXISTS expenses (
                 receiptContent.remove();
             });
         }
-
         async function renderPromotions() {
             if (!elements.promotionsList) return;
             const data = await fetchJSON('index.php?action=get_promotions_json');
-
             if (data.success) {
                 const promotions = data.promotions;
                 elements.promotionsList.innerHTML = promotions.length > 0 ? promotions.map(promo => `
@@ -6545,7 +6257,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                 `).join('') : `<tr><td colspan="7">No promotions found.</td></tr>`;
             }
         }
-
         async function openPromotionModal(promotionId = null) {
             if (!elements.promotionForm) return;
             if (!<?php echo isAdmin() ? 'true' : 'false'; ?>) {
@@ -6563,7 +6274,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             elements.promotionCategoryGroup.style.display = 'none';
             elements.promotionStartDate.value = new Date().toISOString().split('T')[0];
             elements.promotionEndDate.value = '';
-
             if (promotionId) {
                 const data = await fetchJSON(`index.php?action=get_promotions_json&promotion_id=${promotionId}`);
                 if (data.success && data.promotions.length > 0) {
@@ -6574,7 +6284,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                     elements.promotionType.value = promo.type;
                     if (elements.promotionTypePercentage) elements.promotionTypePercentage.classList.remove('active');
                     if (elements.promotionTypeFixed) elements.promotionTypeFixed.classList.remove('active');
-
                     if (promo.type === 'percentage') {
                         if (elements.promotionTypePercentage) elements.promotionTypePercentage.classList.add('active');
                     } else {
@@ -6598,14 +6307,12 @@ CREATE TABLE IF NOT EXISTS expenses (
             }
             showModal(elements.promotionModal);
         }
-
         async function renderExpenses() {
             if (!elements.expensesList) return;
             const search = elements.expenseSearch.value;
             const month = elements.expenseMonthFilter.value;
             const page = pagination.expenses.currentPage;
             const data = await fetchJSON(`index.php?action=get_expenses_json&search=${encodeURIComponent(search)}&month=${month}&page_num=${page}`);
-
             if (data.success) {
                 const expenses = data.expenses;
                 updatePaginationControls(pagination.expenses, data.total_items);
@@ -6628,7 +6335,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                 `).join('') : `<tr><td colspan="5">No expenses recorded for this period.</td></tr>`;
             }
         }
-
         async function openExpenseModal(expenseId = null) {
             if (!elements.expenseForm) return;
             if (!<?php echo isAdmin() ? 'true' : 'false'; ?>) {
@@ -6639,7 +6345,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             elements.expenseId.value = '';
             elements.expenseModalTitle.textContent = 'Add New Expense';
             elements.expenseDate.value = new Date().toISOString().split('T')[0];
-
             if (expenseId) {
                 const data = await fetchJSON(`index.php?action=get_expenses_json&expense_id=${expenseId}`);
                 if (data.success && data.expenses.length > 0) {
@@ -6664,7 +6369,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             elements.reportDateFilter.style.display = 'none';
             elements.reportMonthFilter.style.display = 'none';
             elements.reportYearFilter.style.display = 'none';
-
             const today = new Date();
             if (type === 'sales-daily') {
                 elements.reportDateFilter.style.display = 'block';
@@ -6674,7 +6378,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                 elements.reportMonth.value = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}`;
             }
         }
-
         async function generateReport() {
             if (!elements.reportType) return;
             if (!<?php echo isAdmin() ? 'true' : 'false'; ?>) {
@@ -6685,34 +6388,28 @@ CREATE TABLE IF NOT EXISTS expenses (
             const date = elements.reportDate?.value;
             const month = elements.reportMonth?.value;
             const year = elements.reportYear?.value;
-
             elements.reportResultsHeader.textContent = `Report Results: ${elements.reportType.options[elements.reportType.selectedIndex].text}`;
             elements.exportCurrentReportBtn.disabled = true;
-
             if (reportChartInstance) {
                 reportChartInstance.destroy();
                 reportChartInstance = null;
             }
-
             let url = `index.php?action=get_report_data_json&report_type=${type}`;
             if (date) url += `&date=${date}`;
             if (month) url += `&month=${month}`;
             if (year) url += `&year=${year}`;
-
             const data = await fetchJSON(url);
-
             if (data.success) {
                 elements.reportResultsTable.querySelector('tbody').innerHTML = data.report_data.table_html;
                 currentReportData = data.report_data.raw_data;
                 elements.exportCurrentReportBtn.disabled = currentReportData.length === 0;
-
                 if (data.report_data.chart_data) {
                     if (data.report_data.chart_data.type === 'pie') {
                         const numColors = data.report_data.chart_data.datasets[0].data.length;
                         const backgroundColors = [];
                         const borderColors = [];
                         for (let i = 0; i < numColors; i++) {
-                            const hue = (i * 137) % 360; // Spread hues for better distinction
+                            const hue = (i * 137) % 360;
                             backgroundColors.push(`hsla(${hue}, 70%, 50%, 0.7)`);
                             borderColors.push(`hsla(${hue}, 70%, 50%, 1)`);
                         }
@@ -6835,7 +6532,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                 showToast('Your browser does not support downloading files.', 'error');
             }
         }
-
         async function exportBooks() {
             const data = await fetchJSON(`index.php?action=get_books_json&page_num=1&search=&sort=title-asc&limit=99999`);
             if (data.success) {
@@ -6864,7 +6560,7 @@ CREATE TABLE IF NOT EXISTS expenses (
                     order_date: po.order_date,
                     expected_date: po.expected_date,
                     status: po.status,
-                    items: JSON.stringify(po.items), // Convert items array to JSON string for CSV
+                    items: JSON.stringify(po.items),
                     total_cost: po.total_cost
                 })), 'purchase_orders_export.csv');
             }
@@ -6885,8 +6581,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                 })), 'sales_export.csv');
             }
         }
-
-        // Public Site Functions
         async function renderPublicBooks() {
             if (!elements.publicBooksList) return;
             const search = elements.publicBookSearch ? elements.publicBookSearch.value : '';
@@ -6894,7 +6588,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             const sort = elements.publicBookSort ? elements.publicBookSort.value : 'title-asc';
             const page = pagination.publicBooks.currentPage;
             const data = await fetchJSON(`index.php?action=get_public_books_json&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}&sort=${sort}&page_num=${page}`);
-
             if (data.success) {
                 const books = data.books;
                 updatePaginationControls(pagination.publicBooks, data.total_items);
@@ -6913,7 +6606,6 @@ CREATE TABLE IF NOT EXISTS expenses (
         }
 
         function setupEventListeners() {
-            // Common Event Listeners
             if (elements.darkModeSwitch) {
                 elements.darkModeSwitch.addEventListener('change', (e) => {
                     if (e.target.checked) {
@@ -6930,19 +6622,16 @@ CREATE TABLE IF NOT EXISTS expenses (
                     document.documentElement.setAttribute('data-theme', 'dark');
                 }
             }
-
             if (elements.navLinks) {
                 elements.navLinks.forEach(link => {
-                    link.addEventListener('click', (e) => {}); // PHP handles navigation
+                    link.addEventListener('click', (e) => {});
                 });
             }
-
             if (elements.hamburgerMenu) {
                 elements.hamburgerMenu.addEventListener('click', () => {
                     elements.sidebar.classList.toggle('active');
                 });
             }
-
             if (elements.modalCloseButtons) {
                 elements.modalCloseButtons.forEach(btn => {
                     btn.addEventListener('click', (e) => {
@@ -6958,8 +6647,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                     }
                 });
             });
-
-            // Admin/Staff Event Listeners
             if (elements.addBookBtn) elements.addBookBtn.addEventListener('click', () => openBookModal());
             if (elements.bookSearch) elements.bookSearch.addEventListener('input', () => {
                 pagination.books.currentPage = 1;
@@ -7000,7 +6687,7 @@ CREATE TABLE IF NOT EXISTS expenses (
                 if (event.target.checked) {
                     elements.bookCoverPreview.src = '';
                     elements.bookCoverPreview.style.display = 'none';
-                    elements.bookCoverImage.value = ''; // Clear file input as well
+                    elements.bookCoverImage.value = '';
                 } else if (elements.existingCoverImage.value) {
                     elements.bookCoverPreview.src = elements.existingCoverImage.value;
                     elements.bookCoverPreview.style.display = 'block';
@@ -7010,7 +6697,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             if (elements.importBooksBtn) elements.importBooksBtn.addEventListener('click', () => {
                 showModal(elements.importBooksModal);
             });
-
             if (elements.addCustomerBtn) elements.addCustomerBtn.addEventListener('click', () => openCustomerModal());
             if (elements.customerSearch) elements.customerSearch.addEventListener('input', () => {
                 pagination.customers.currentPage = 1;
@@ -7032,7 +6718,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             if (elements.importCustomersBtn) elements.importCustomersBtn.addEventListener('click', () => {
                 showModal(elements.importCustomersModal);
             });
-
             if (elements.addSupplierBtn) elements.addSupplierBtn.addEventListener('click', () => openSupplierModal());
             if (elements.supplierSearch) elements.supplierSearch.addEventListener('input', () => {
                 pagination.suppliers.currentPage = 1;
@@ -7050,7 +6735,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             if (elements.importSuppliersBtn) elements.importSuppliersBtn.addEventListener('click', () => {
                 showModal(elements.importSuppliersModal);
             });
-
             if (elements.createPoBtn) elements.createPoBtn.addEventListener('click', () => openPurchaseOrderModal());
             if (elements.poSearch) elements.poSearch.addEventListener('input', () => {
                 pagination.purchaseOrders.currentPage = 1;
@@ -7078,7 +6762,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                     }
                 });
             }
-
             if (elements.bookToCartSearch) elements.bookToCartSearch.addEventListener('input', () => {
                 pagination.booksForCart.currentPage = 1;
                 renderBooksForCart();
@@ -7100,14 +6783,10 @@ CREATE TABLE IF NOT EXISTS expenses (
                 elements.checkoutCartItemsInput.value = JSON.stringify(currentCart);
             });
             if (elements.checkoutModal) elements.checkoutModal.addEventListener('focusout', (e) => {
-                // This event listener on focusout is tricky and might fire unexpectedly.
-                // It's often better to re-render cart only when the modal is closed explicitly or on specific actions.
-                // For now, keep it, but be aware of potential UX issues.
                 if (!elements.checkoutModal.contains(e.relatedTarget)) {
                     renderCart();
                 }
             });
-
             if (elements.viewSalesHistoryBtn) elements.viewSalesHistoryBtn.addEventListener('click', () => window.location.href = 'index.php?page=sales-history');
             if (elements.backToCartBtn) elements.backToCartBtn.addEventListener('click', () => window.location.href = 'index.php?page=cart');
             if (elements.saleSearch) elements.saleSearch.addEventListener('input', () => {
@@ -7125,7 +6804,6 @@ CREATE TABLE IF NOT EXISTS expenses (
             if (elements.exportSalesBtn) elements.exportSalesBtn.addEventListener('click', exportSales);
             if (elements.printReceiptBtn) elements.printReceiptBtn.addEventListener('click', printReceipt);
             if (elements.downloadReceiptBtn) elements.downloadReceiptBtn.addEventListener('click', downloadReceiptPdf);
-
             if (elements.addPromotionBtn) elements.addPromotionBtn.addEventListener('click', () => openPromotionModal());
             if (elements.promotionTypePercentage) elements.promotionTypePercentage.addEventListener('click', () => {
                 elements.promotionType.value = 'percentage';
@@ -7146,7 +6824,6 @@ CREATE TABLE IF NOT EXISTS expenses (
                     elements.promotionCategoryGroup.style.display = 'block';
                 }
             });
-
             if (elements.addExpenseBtn) elements.addExpenseBtn.addEventListener('click', () => openExpenseModal());
             if (elements.expenseSearch) elements.expenseSearch.addEventListener('input', () => {
                 pagination.expenses.currentPage = 1;
@@ -7164,16 +6841,12 @@ CREATE TABLE IF NOT EXISTS expenses (
                 pagination.expenses.currentPage++;
                 renderExpenses();
             });
-
             if (elements.reportType) elements.reportType.addEventListener('change', updateReportFilters);
             if (elements.generateReportBtn) elements.generateReportBtn.addEventListener('click', generateReport);
             if (elements.exportCurrentReportBtn) elements.exportCurrentReportBtn.addEventListener('click', exportCurrentReport);
-
             if (elements.importFile) elements.importFile.addEventListener('change', () => {
                 elements.importAllDataBtn.disabled = !elements.importFile.files.length;
             });
-
-            // Public Site Event Listeners
             if (elements.publicBookSearch) elements.publicBookSearch.addEventListener('input', () => {
                 pagination.publicBooks.currentPage = 1;
                 renderPublicBooks();
@@ -7195,9 +6868,7 @@ CREATE TABLE IF NOT EXISTS expenses (
                 renderPublicBooks();
             });
         }
-
         document.addEventListener('DOMContentLoaded', async () => {
-            // Initialize pagination elements if they exist on the current page
             if (elements.booksPagination) {
                 pagination.books.elements = {
                     prev: elements.booksPrevPage,
@@ -7247,26 +6918,19 @@ CREATE TABLE IF NOT EXISTS expenses (
                     info: elements.expensesPageInfo
                 };
             }
-            if (elements.publicBooksPagination) { // Public books pagination
+            if (elements.publicBooksPagination) {
                 pagination.publicBooks.elements = {
                     prev: elements.publicBooksPrevPage,
                     next: elements.publicBooksNextPage,
                     info: elements.publicBooksPageInfo
                 };
             }
-
             setupEventListeners();
-
-            // Display initial toast if any from PHP session
             const initialToastData = document.getElementById('initial-toast-data');
             if (initialToastData) {
                 showToast(initialToastData.dataset.message, initialToastData.dataset.type);
             }
-
-            // Render specific page content based on PHP's $page variable
             const currentPage = "<?php echo $page; ?>";
-
-            // Admin/Staff pages
             if (currentPage === 'books') {
                 await renderBooks();
             } else if (currentPage === 'customers') {
@@ -7277,8 +6941,7 @@ CREATE TABLE IF NOT EXISTS expenses (
                 await renderPurchaseOrders();
             } else if (currentPage === 'cart') {
                 await renderBooksForCart();
-                await renderCart(); // Ensure cart is rendered after potentially loading session data
-
+                await renderCart();
                 const lastSaleId = "<?php echo $_SESSION['last_sale_id'] ?? '';
                                     unset($_SESSION['last_sale_id']); ?>";
                 if (lastSaleId) {
@@ -7295,9 +6958,35 @@ CREATE TABLE IF NOT EXISTS expenses (
                 await renderExpenses();
             } else if (currentPage === 'reports') {
                 updateReportFilters();
+            } else if (currentPage === 'customer-dashboard') {
+                fetchJSON('index.php?action=get_customer_details_json')
+                    .then(data => {
+                        if (data.success) {
+                            const detailsDiv = document.getElementById('customer-profile-details');
+                            const c = data.customer;
+                            detailsDiv.innerHTML = `
+                    <p><strong>Name:</strong> ${html(c.name)}</p>
+                    <p><strong>Email:</strong> ${html(c.email)}</p>
+                    <p><strong>Phone:</strong> ${html(c.phone)}</p>
+                    <p><strong>Address:</strong> ${html(c.address || 'Not provided')}</p>
+                `;
+                        }
+                    });
+                fetchJSON('index.php?action=get_customer_history_json')
+                    .then(data => {
+                        if (data.success) {
+                            const historyList = document.getElementById('customer-dashboard-history-list');
+                            historyList.innerHTML = data.sales.length > 0 ? data.sales.map(sale => `
+                    <tr>
+                        <td>${html(sale.id)}</td>
+                        <td>${formatDate(sale.sale_date)}</td>
+                        <td>${html(sale.item_titles)}</td>
+                        <td>${formatCurrency(sale.total)}</td>
+                    </tr>
+                `).join('') : `<tr><td colspan="4">You have no past purchases.</td></tr>`;
+                        }
+                    });
             }
-
-            // Public pages
             if (currentPage === 'books-public') {
                 await renderPublicBooks();
             }
