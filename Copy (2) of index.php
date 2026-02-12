@@ -14,15 +14,6 @@ if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 $conn->set_charset("utf8mb4");
-$currency_symbol = 'PKR ';
-$settings = [];
-$settings_result = $conn->query("SELECT setting_key, setting_value FROM settings");
-if ($settings_result) {
-    while ($row = $settings_result->fetch_assoc()) {
-        $settings[$row['setting_key']] = $row['setting_value'];
-    }
-    $currency_symbol = html($settings['currency_symbol'] ?? 'PKR ');
-}
 function html($text)
 {
     return htmlspecialchars($text ?? '', ENT_QUOTES, 'UTF-8');
@@ -65,8 +56,7 @@ function generate_uuid()
 }
 function format_currency($amount)
 {
-    global $currency_symbol;
-    return $currency_symbol . number_format($amount, 2);
+    return 'PKR ' . number_format($amount, 2);
 }
 function format_date($timestamp)
 {
@@ -83,7 +73,7 @@ if (isset($_GET['action'])) {
         $_SESSION['toast'] = ['type' => 'info', 'message' => 'You have been logged out.'];
         redirect('login');
     }
-    if (in_array($_GET['action'], ['get_public_books_json', 'get_online_order_status'])) {
+    if (in_array($_GET['action'], ['get_public_books_json'])) {
     } elseif (!isLoggedIn()) {
         echo json_encode(['success' => false, 'message' => 'Unauthorized']);
         exit();
@@ -105,7 +95,7 @@ if (isset($_GET['action'])) {
             $book_id = $_GET['book_id'] ?? null;
             $page = $_GET['page_num'] ?? 1;
             $search = $_GET['search'] ?? '';
-            $sort = $_GET['sort'] ?? 'name-asc';
+            $sort = $_GET['sort'] ?? 'title-asc';
             $limit = $_GET['limit'] ?? 10;
             $offset = ($page - 1) * $limit;
             $where_clauses = [];
@@ -118,17 +108,17 @@ if (isset($_GET['action'])) {
             }
             if ($search) {
                 $search_term = '%' . $search . '%';
-                $where_clauses[] = "(name LIKE ? OR author LIKE ? OR isbn LIKE ? OR category LIKE ?)";
+                $where_clauses[] = "(title LIKE ? OR author LIKE ? OR isbn LIKE ? OR category LIKE ?)";
                 $params = array_merge($params, [$search_term, $search_term, $search_term, $search_term]);
                 $types .= 'ssss';
             }
             $order_by = '';
             switch ($sort) {
-                case 'name-asc':
-                    $order_by = 'name ASC';
+                case 'title-asc':
+                    $order_by = 'title ASC';
                     break;
-                case 'name-desc':
-                    $order_by = 'name DESC';
+                case 'title-desc':
+                    $order_by = 'title DESC';
                     break;
                 case 'price-asc':
                     $order_by = 'price ASC';
@@ -172,8 +162,7 @@ if (isset($_GET['action'])) {
             $page = $_GET['page_num'] ?? 1;
             $search = $_GET['search'] ?? '';
             $category = $_GET['category'] ?? 'all';
-            $product_type = $_GET['product_type'] ?? 'all';
-            $sort = $_GET['sort'] ?? 'name-asc';
+            $sort = $_GET['sort'] ?? 'title-asc';
             $limit = $_GET['limit'] ?? 12;
             $offset = ($page - 1) * $limit;
             $where_clauses = ["stock > 0"];
@@ -181,7 +170,7 @@ if (isset($_GET['action'])) {
             $types = '';
             if ($search) {
                 $search_term = '%' . $search . '%';
-                $where_clauses[] = "(name LIKE ? OR author LIKE ? OR isbn LIKE ? OR description LIKE ?)";
+                $where_clauses[] = "(title LIKE ? OR author LIKE ? OR isbn LIKE ? OR description LIKE ?)";
                 $params = array_merge($params, [$search_term, $search_term, $search_term, $search_term]);
                 $types .= 'ssss';
             }
@@ -190,18 +179,13 @@ if (isset($_GET['action'])) {
                 $params[] = $category;
                 $types .= 's';
             }
-            if ($product_type !== 'all') {
-                $where_clauses[] = "product_type = ?";
-                $params[] = $product_type;
-                $types .= 's';
-            }
             $order_by = '';
             switch ($sort) {
-                case 'name-asc':
-                    $order_by = 'name ASC';
+                case 'title-asc':
+                    $order_by = 'title ASC';
                     break;
-                case 'name-desc':
-                    $order_by = 'name DESC';
+                case 'title-desc':
+                    $order_by = 'title DESC';
                     break;
                 case 'price-asc':
                     $order_by = 'price ASC';
@@ -218,7 +202,7 @@ if (isset($_GET['action'])) {
             $stmt->execute();
             $total_items = $stmt->get_result()->fetch_assoc()['total'];
             $stmt->close();
-            $sql = "SELECT id, name, author, category, isbn, price, stock, description, cover_image, product_type FROM books $where_sql ORDER BY $order_by LIMIT ? OFFSET ?";
+            $sql = "SELECT id, title, author, category, isbn, price, stock, description, cover_image FROM books $where_sql ORDER BY $order_by LIMIT ? OFFSET ?";
             $stmt = $conn->prepare($sql);
             if ($types) {
                 $all_params = array_merge($params, [$limit, $offset]);
@@ -269,7 +253,7 @@ if (isset($_GET['action'])) {
             $stmt->execute();
             $total_items = $stmt->get_result()->fetch_assoc()['total'];
             $stmt->close();
-            $sql = "SELECT id, name, phone, email, address, is_active FROM customers $where_sql ORDER BY name ASC LIMIT ? OFFSET ?";
+            $sql = "SELECT * FROM customers $where_sql ORDER BY name ASC LIMIT ? OFFSET ?";
             $stmt = $conn->prepare($sql);
             if ($types) {
                 $all_params = array_merge($params, [$limit, $offset]);
@@ -380,7 +364,7 @@ if (isset($_GET['action'])) {
             $result = $stmt->get_result();
             $purchase_orders = [];
             while ($row = $result->fetch_assoc()) {
-                $po_items_stmt = $conn->prepare("SELECT poi.*, b.name FROM po_items poi JOIN books b ON poi.book_id = b.id WHERE poi.po_id = ?");
+                $po_items_stmt = $conn->prepare("SELECT poi.*, b.title FROM po_items poi JOIN books b ON poi.book_id = b.id WHERE poi.po_id = ?");
                 $po_items_stmt->bind_param('i', $row['id']);
                 $po_items_stmt->execute();
                 $po_items_result = $po_items_stmt->get_result();
@@ -404,7 +388,7 @@ if (isset($_GET['action'])) {
             $types = '';
             if ($search) {
                 $search_term = '%' . $search . '%';
-                $where_clauses[] = "(name LIKE ? OR author LIKE ? OR isbn LIKE ?)";
+                $where_clauses[] = "(title LIKE ? OR author LIKE ? OR isbn LIKE ?)";
                 $params = array_merge($params, [$search_term, $search_term, $search_term]);
                 $types .= 'sss';
             }
@@ -416,7 +400,7 @@ if (isset($_GET['action'])) {
             $stmt->execute();
             $total_items = $stmt->get_result()->fetch_assoc()['total'];
             $stmt->close();
-            $sql = "SELECT id, name, author, price, stock, category, product_type FROM books $where_sql ORDER BY name ASC LIMIT ? OFFSET ?";
+            $sql = "SELECT * FROM books $where_sql ORDER BY title ASC LIMIT ? OFFSET ?";
             $stmt = $conn->prepare($sql);
             if ($types) {
                 $all_params = array_merge($params, [$limit, $offset]);
@@ -443,7 +427,7 @@ if (isset($_GET['action'])) {
             $types = '';
             if ($search) {
                 $search_term = '%' . $search . '%';
-                $where_clauses[] = "(s.id LIKE ? OR c.name LIKE ? OR b.name LIKE ?)";
+                $where_clauses[] = "(s.id LIKE ? OR c.name LIKE ? OR b.title LIKE ?)";
                 $params = array_merge($params, [$search_term, $search_term, $search_term]);
                 $types .= 'sss';
             }
@@ -458,7 +442,7 @@ if (isset($_GET['action'])) {
             $total_items = $stmt->get_result()->fetch_assoc()['total'];
             $stmt->close();
             $sql = "SELECT s.*, c.name AS customer_name,
-                    GROUP_CONCAT(CONCAT(b.name, ' (', si.quantity, ')') SEPARATOR ', ') AS item_names
+                    GROUP_CONCAT(CONCAT(b.title, ' (', si.quantity, ')') SEPARATOR ', ') AS item_titles
                     FROM sales s
                     $join_sql
                     $where_sql
@@ -512,7 +496,7 @@ if (isset($_GET['action'])) {
             $sale = $stmt->get_result()->fetch_assoc();
             $stmt->close();
             if ($sale) {
-                $stmt_items = $conn->prepare("SELECT si.*, b.name FROM sale_items si JOIN books b ON si.book_id = b.id WHERE si.sale_id = ?");
+                $stmt_items = $conn->prepare("SELECT si.*, b.title FROM sale_items si JOIN books b ON si.book_id = b.id WHERE si.sale_id = ?");
                 $stmt_items->bind_param('i', $sale_id);
                 $stmt_items->execute();
                 $items = $stmt_items->get_result()->fetch_all(MYSQLI_ASSOC);
@@ -534,7 +518,7 @@ if (isset($_GET['action'])) {
                 exit();
             }
             $stmt = $conn->prepare("SELECT s.*, 
-                                    GROUP_CONCAT(CONCAT(b.name, ' (', si.quantity, ')') SEPARATOR ', ') AS item_names
+                                    GROUP_CONCAT(CONCAT(b.title, ' (', si.quantity, ')') SEPARATOR ', ') AS item_titles
                                     FROM sales s
                                     JOIN sale_items si ON s.id = si.sale_id
                                     JOIN books b ON si.book_id = b.id
@@ -546,78 +530,6 @@ if (isset($_GET['action'])) {
             $sales = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
             $stmt->close();
             echo json_encode(['success' => true, 'sales' => $sales]);
-            exit();
-        case 'get_online_orders_json':
-            if (!isAdmin() && !isStaff() && !isCustomer()) {
-                echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-                exit();
-            }
-            $order_id = $_GET['order_id'] ?? null;
-            $page = $_GET['page_num'] ?? 1;
-            $search = $_GET['search'] ?? '';
-            $status = $_GET['status'] ?? 'all';
-            if (isAdmin() || isStaff()) {
-                $status = $_GET['status'] ?? 'pending';
-            }
-            $limit = 10;
-            $offset = ($page - 1) * $limit;
-            $where_clauses = [];
-            $params = [];
-            $types = '';
-            if (isCustomer()) {
-                $where_clauses[] = "oo.customer_id = ?";
-                $params[] = $_SESSION['customer_id'];
-                $types .= 'i';
-            }
-            if ($order_id) {
-                $where_clauses[] = "oo.id = ?";
-                $params[] = $order_id;
-                $types .= 'i';
-            }
-            if ($search) {
-                $search_term = '%' . $search . '%';
-                $where_clauses[] = "(oo.id LIKE ? OR c.name LIKE ?)";
-                $params = array_merge($params, [$search_term, $search_term]);
-                $types .= 'ss';
-            }
-            if ($status !== 'all') {
-                $where_clauses[] = "oo.status = ?";
-                $params[] = $status;
-                $types .= 's';
-            }
-            $where_sql = count($where_clauses) > 0 ? 'WHERE ' . implode(' AND ', $where_clauses) : '';
-            $stmt = $conn->prepare("SELECT COUNT(*) AS total FROM online_orders oo JOIN customers c ON oo.customer_id = c.id $where_sql");
-            if ($types) {
-                $stmt->bind_param($types, ...$params);
-            }
-            $stmt->execute();
-            $total_items = $stmt->get_result()->fetch_assoc()['total'];
-            $stmt->close();
-            $sql = "SELECT oo.*, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone FROM online_orders oo JOIN customers c ON oo.customer_id = c.id $where_sql ORDER BY oo.order_date DESC LIMIT ? OFFSET ?";
-            $stmt = $conn->prepare($sql);
-            if ($types) {
-                $all_params = array_merge($params, [$limit, $offset]);
-                $stmt->bind_param($types . 'ii', ...$all_params);
-            } else {
-                $stmt->bind_param('ii', $limit, $offset);
-            }
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $online_orders = [];
-            while ($row = $result->fetch_assoc()) {
-                $order_items_stmt = $conn->prepare("SELECT ooi.*, b.name FROM online_order_items ooi JOIN books b ON ooi.book_id = b.id WHERE ooi.order_id = ?");
-                $order_items_stmt->bind_param('i', $row['id']);
-                $order_items_stmt->execute();
-                $order_items_result = $order_items_stmt->get_result();
-                $row['items'] = [];
-                while ($item_row = $order_items_result->fetch_assoc()) {
-                    $row['items'][] = $item_row;
-                }
-                $order_items_stmt->close();
-                $online_orders[] = $row;
-            }
-            $stmt->close();
-            echo json_encode(['success' => true, 'online_orders' => $online_orders, 'total_items' => $total_items]);
             exit();
         case 'get_promotions_json':
             if (!isAdmin()) {
@@ -635,7 +547,7 @@ if (isset($_GET['action'])) {
             }
             $where_sql = count($where_clauses) > 0 ? 'WHERE ' . implode(' AND ', $where_clauses) : '';
             $promotions = [];
-            $sql = "SELECT p.*, b.name AS book_name, b.author AS book_author 
+            $sql = "SELECT p.*, b.title AS book_title, b.author AS book_author 
                     FROM promotions p 
                     LEFT JOIN books b ON p.applies_to_value = b.id AND p.applies_to = 'specific-book' 
                     $where_sql
@@ -648,14 +560,14 @@ if (isset($_GET['action'])) {
             $result = $stmt->get_result();
             if ($result) {
                 while ($row = $result->fetch_assoc()) {
-                    if ($row['applies_to'] === 'specific-book' && $row['book_name']) {
-                        $row['applies_to_value_name'] = html($row['book_name'] . ($row['book_author'] ? ' by ' . $row['book_author'] : ''));
+                    if ($row['applies_to'] === 'specific-book' && $row['book_title']) {
+                        $row['applies_to_value_title'] = html($row['book_title'] . ' by ' . $row['book_author']);
                     } else if ($row['applies_to'] === 'specific-category' && $row['applies_to_value']) {
-                        $row['applies_to_value_name'] = html($row['applies_to_value']);
+                        $row['applies_to_value_title'] = html($row['applies_to_value']);
                     } else if ($row['applies_to'] === 'all') {
-                        $row['applies_to_value_name'] = 'Entire Order';
+                        $row['applies_to_value_title'] = 'Entire Order';
                     } else {
-                        $row['applies_to_value_name'] = 'N/A';
+                        $row['applies_to_value_title'] = 'N/A';
                     }
                     $promotions[] = $row;
                 }
@@ -730,23 +642,8 @@ if (isset($_GET['action'])) {
             }
             echo json_encode(['success' => true, 'expenses' => $expenses, 'total_items' => $total_items, 'monthly_total' => $monthly_total]);
             exit();
-        case 'get_settings_json':
-            if (!isAdmin()) {
-                echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-                exit();
-            }
-            $stmt = $conn->prepare("SELECT * FROM settings");
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $settings_data = [];
-            while ($row = $result->fetch_assoc()) {
-                $settings_data[$row['setting_key']] = $row['setting_value'];
-            }
-            $stmt->close();
-            echo json_encode(['success' => true, 'settings' => $settings_data]);
-            exit();
         case 'get_report_data_json':
-            if (!isAdmin() && !isStaff()) {
+            if (!isAdmin()) {
                 echo json_encode(['success' => false, 'message' => 'Unauthorized']);
                 exit();
             }
@@ -780,7 +677,7 @@ if (isset($_GET['action'])) {
                     $report_data['chart_data'] = [
                         'labels' => ['Total Sales', 'Total Discount'],
                         'datasets' => [
-                            ['label' => 'Amount', 'data' => [$total_sales, $total_discount_applied], 'backgroundColor' => ['#2a9d8f', '#f4a261'], 'borderColor' => ['#2a9d8f', '#f4a261'], 'borderWidth' => 1]
+                            ['label' => 'Amount (PKR)', 'data' => [$total_sales, $total_discount_applied], 'backgroundColor' => ['#2a9d8f', '#f4a261'], 'borderColor' => ['#2a9d8f', '#f4a261'], 'borderWidth' => 1]
                         ],
                         'type' => 'bar',
                         'title' => "Daily Sales Report for " . html($selected_date)
@@ -849,7 +746,7 @@ if (isset($_GET['action'])) {
                     $report_data['chart_data'] = [
                         'labels' => $chart_labels,
                         'datasets' => [
-                            ['label' => 'Weekly Sales', 'data' => $chart_data_sales, 'backgroundColor' => 'rgba(42, 157, 143, 0.7)', 'borderColor' => 'rgba(42, 157, 143, 1)', 'borderWidth' => 1, 'fill' => false, 'tension' => 0.3]
+                            ['label' => 'Weekly Sales (PKR)', 'data' => $chart_data_sales, 'backgroundColor' => 'rgba(42, 157, 143, 0.7)', 'borderColor' => 'rgba(42, 157, 143, 1)', 'borderWidth' => 1, 'fill' => false, 'tension' => 0.3]
                         ],
                         'type' => 'line',
                         'title' => "Weekly Sales Report for " . html($selected_month_str)
@@ -885,7 +782,7 @@ if (isset($_GET['action'])) {
                     $report_data['chart_data'] = [
                         'labels' => ['Total Sales', 'Total Discount'],
                         'datasets' => [
-                            ['label' => 'Amount', 'data' => [$total_sales, $total_discount_applied], 'backgroundColor' => ['#2a9d8f', '#f4a261'], 'borderColor' => ['#2a9d8f', '#f4a261'], 'borderWidth' => 1]
+                            ['label' => 'Amount (PKR)', 'data' => [$total_sales, $total_discount_applied], 'backgroundColor' => ['#2a9d8f', '#f4a261'], 'borderColor' => ['#2a9d8f', '#f4a261'], 'borderWidth' => 1]
                         ],
                         'type' => 'bar',
                         'title' => "Monthly Sales Report for " . html($selected_month_str)
@@ -899,7 +796,7 @@ if (isset($_GET['action'])) {
                     ];
                     break;
                 case 'best-selling':
-                    $stmt = $conn->prepare("SELECT b.name, b.author, SUM(si.quantity) AS total_quantity_sold, SUM((si.price_per_unit * si.quantity) - si.discount_per_unit) AS total_revenue 
+                    $stmt = $conn->prepare("SELECT b.title, b.author, SUM(si.quantity) AS total_quantity_sold, SUM((si.price_per_unit * si.quantity) - si.discount_per_unit) AS total_revenue 
                                             FROM sale_items si 
                                             JOIN books b ON si.book_id = b.id 
                                             GROUP BY b.id 
@@ -918,21 +815,21 @@ if (isset($_GET['action'])) {
                     $chart_data_revenue = [];
                     $raw_data_array = [];
                     foreach ($best_selling_books as $index => $book) {
-                        $html .= "<tr><td>" . html($index + 1) . "</td><td>" . html($book['name']) . " (" . html($book['author']) . ")</td><td>" . html($book['total_quantity_sold']) . " units sold, " . format_currency($book['total_revenue']) . " revenue</td></tr>";
-                        $chart_labels[] = html($book['name']);
+                        $html .= "<tr><td>" . html($index + 1) . "</td><td>" . html($book['title']) . "</td><td>" . html($book['total_quantity_sold']) . " units sold, " . format_currency($book['total_revenue']) . " revenue</td></tr>";
+                        $chart_labels[] = html($book['title']);
                         $chart_data_sales[] = $book['total_quantity_sold'];
                         $chart_data_revenue[] = $book['total_revenue'];
-                        $raw_data_array[] = ['Rank' => $index + 1, 'Name' => $book['name'], 'Units Sold' => $book['total_quantity_sold'], 'Revenue' => format_currency($book['total_revenue'])];
+                        $raw_data_array[] = ['Rank' => $index + 1, 'Title' => $book['title'], 'Units Sold' => $book['total_quantity_sold'], 'Revenue' => format_currency($book['total_revenue'])];
                     }
                     $report_data['table_html'] = $html ?: '<tr><td colspan="3">No sales data to generate best-selling report.</td></tr>';
                     $report_data['chart_data'] = [
                         'labels' => $chart_labels,
                         'datasets' => [
                             ['label' => 'Units Sold', 'data' => $chart_data_sales, 'backgroundColor' => 'rgba(42, 157, 143, 0.7)', 'borderColor' => 'rgba(42, 157, 143, 1)', 'borderWidth' => 1],
-                            ['label' => 'Revenue', 'data' => $chart_data_revenue, 'backgroundColor' => 'rgba(244, 162, 97, 0.7)', 'borderColor' => 'rgba(244, 162, 97, 1)', 'borderWidth' => 1]
+                            ['label' => 'Revenue (PKR)', 'data' => $chart_data_revenue, 'backgroundColor' => 'rgba(244, 162, 97, 0.7)', 'borderColor' => 'rgba(244, 162, 97, 1)', 'borderWidth' => 1]
                         ],
                         'type' => 'bar',
-                        'title' => 'Top 10 Best-Selling Products'
+                        'title' => 'Top 10 Best-Selling Books'
                     ];
                     $report_data['raw_data'] = $raw_data_array;
                     break;
@@ -940,7 +837,6 @@ if (isset($_GET['action'])) {
                     $stmt = $conn->prepare("SELECT b.author, SUM(si.quantity) AS total_quantity_sold, SUM((si.price_per_unit * si.quantity) - si.discount_per_unit) AS total_revenue 
                                             FROM sale_items si 
                                             JOIN books b ON si.book_id = b.id 
-                                            WHERE b.product_type = 'book' AND b.author IS NOT NULL AND b.author != ''
                                             GROUP BY b.author 
                                             ORDER BY total_quantity_sold DESC 
                                             LIMIT 10");
@@ -968,7 +864,7 @@ if (isset($_GET['action'])) {
                         'labels' => $chart_labels,
                         'datasets' => [
                             ['label' => 'Units Sold', 'data' => $chart_data_sales, 'backgroundColor' => 'rgba(42, 157, 143, 0.7)', 'borderColor' => 'rgba(42, 157, 143, 1)', 'borderWidth' => 1],
-                            ['label' => 'Revenue', 'data' => $chart_data_revenue, 'backgroundColor' => 'rgba(244, 162, 97, 0.7)', 'borderColor' => 'rgba(244, 162, 97, 1)', 'borderWidth' => 1]
+                            ['label' => 'Revenue (PKR)', 'data' => $chart_data_revenue, 'backgroundColor' => 'rgba(244, 162, 97, 0.7)', 'borderColor' => 'rgba(244, 162, 97, 1)', 'borderWidth' => 1]
                         ],
                         'type' => 'bar',
                         'title' => 'Top 10 Best-Selling Authors'
@@ -976,7 +872,7 @@ if (isset($_GET['action'])) {
                     $report_data['raw_data'] = $raw_data_array;
                     break;
                 case 'low-stock':
-                    $stmt = $conn->prepare("SELECT name, author, stock, isbn, product_type FROM books WHERE stock < 5 ORDER BY stock ASC");
+                    $stmt = $conn->prepare("SELECT title, author, stock, isbn FROM books WHERE stock < 5 ORDER BY stock ASC");
                     $stmt->execute();
                     $result = $stmt->get_result();
                     $low_stock_books = [];
@@ -989,19 +885,19 @@ if (isset($_GET['action'])) {
                     $chart_data_stock = [];
                     $raw_data_array = [];
                     foreach ($low_stock_books as $index => $book) {
-                        $html .= "<tr class='low-stock'><td>" . html($index + 1) . "</td><td>" . html($book['name']) . ($book['author'] ? " (" . html($book['author']) . ")" : '') . "</td><td>" . html($book['stock']) . " in stock</td></tr>";
-                        $chart_labels[] = html($book['name']);
+                        $html .= "<tr class='low-stock'><td>" . html($index + 1) . "</td><td>" . html($book['title']) . " (" . html($book['author']) . ")</td><td>" . html($book['stock']) . " in stock</td></tr>";
+                        $chart_labels[] = html($book['title']);
                         $chart_data_stock[] = $book['stock'];
-                        $raw_data_array[] = ['Rank' => $index + 1, 'Name' => $book['name'], 'Author' => $book['author'], 'Stock' => $book['stock'], 'ISBN' => $book['isbn'], 'Product Type' => $book['product_type']];
+                        $raw_data_array[] = ['Rank' => $index + 1, 'Title' => $book['title'], 'Author' => $book['author'], 'Stock' => $book['stock'], 'ISBN' => $book['isbn']];
                     }
-                    $report_data['table_html'] = $html ?: '<tr><td colspan="3">No products currently low in stock.</td></tr>';
+                    $report_data['table_html'] = $html ?: '<tr><td colspan="3">No books currently low in stock.</td></tr>';
                     $report_data['chart_data'] = [
                         'labels' => $chart_labels,
                         'datasets' => [
                             ['label' => 'Stock Quantity', 'data' => $chart_data_stock, 'backgroundColor' => 'rgba(231, 111, 81, 0.7)', 'borderColor' => 'rgba(231, 111, 81, 1)', 'borderWidth' => 1]
                         ],
                         'type' => 'bar',
-                        'title' => 'Products Low in Stock (< 5 units)'
+                        'title' => 'Books Low in Stock (< 5 units)'
                     ];
                     $report_data['raw_data'] = $raw_data_array;
                     break;
@@ -1035,7 +931,7 @@ if (isset($_GET['action'])) {
                     $report_data['chart_data'] = [
                         'labels' => $chart_labels,
                         'datasets' => [
-                            ['label' => 'Amount', 'data' => $chart_data_amounts, 'backgroundColor' => [], 'borderColor' => [], 'borderWidth' => 1]
+                            ['label' => 'Amount (PKR)', 'data' => $chart_data_amounts, 'backgroundColor' => [], 'borderColor' => [], 'borderWidth' => 1]
                         ],
                         'type' => 'pie',
                         'title' => "Expenses Summary for " . html($selected_month_str)
@@ -1045,190 +941,36 @@ if (isset($_GET['action'])) {
             }
             echo json_encode(['success' => true, 'report_data' => $report_data]);
             exit();
-        case 'global_search_json':
-            if (!isAdmin() && !isStaff()) {
-                echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-                exit();
-            }
-            $query = $_GET['query'] ?? '';
-            $results = [];
-            if (strlen($query) < 2) {
-                echo json_encode(['success' => true, 'results' => []]);
-                exit();
-            }
-            $search_term = '%' . $query . '%';
-            $stmt = $conn->prepare("SELECT id, name FROM books WHERE name LIKE ? LIMIT 5");
-            $stmt->bind_param('s', $search_term);
-            $stmt->execute();
-            $book_res = $stmt->get_result();
-            while ($row = $book_res->fetch_assoc()) {
-                $results[] = ['type' => 'Product', 'id' => $row['id'], 'name' => $row['name'], 'link' => 'index.php?page=books'];
-            }
-            $stmt->close();
-            $stmt = $conn->prepare("SELECT id, name FROM customers WHERE name LIKE ? LIMIT 5");
-            $stmt->bind_param('s', $search_term);
-            $stmt->execute();
-            $customer_res = $stmt->get_result();
-            while ($row = $customer_res->fetch_assoc()) {
-                $results[] = ['type' => 'Customer', 'id' => $row['id'], 'name' => $row['name'], 'link' => 'index.php?page=customers'];
-            }
-            $stmt->close();
-            $stmt = $conn->prepare("SELECT id FROM sales WHERE id LIKE ? LIMIT 5");
-            $stmt->bind_param('s', $search_term);
-            $stmt->execute();
-            $sale_res = $stmt->get_result();
-            while ($row = $sale_res->fetch_assoc()) {
-                $results[] = ['type' => 'Sale', 'id' => $row['id'], 'name' => 'Sale #' . $row['id'], 'link' => 'index.php?page=sales-history'];
-            }
-            $stmt->close();
-            echo json_encode(['success' => true, 'results' => $results]);
-            exit();
-        case 'get_online_order_status':
-            if (!isCustomer()) {
-                echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-                exit();
-            }
-            $order_id = $_GET['order_id'] ?? null;
-            if (!$order_id) {
-                echo json_encode(['success' => false, 'message' => 'Order ID is required.']);
-                exit();
-            }
-            $stmt = $conn->prepare("SELECT status FROM online_orders WHERE id = ? AND customer_id = ?");
-            $stmt->bind_param('ii', $order_id, $_SESSION['customer_id']);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $order = $result->fetch_assoc();
-            $stmt->close();
-            if ($order) {
-                echo json_encode(['success' => true, 'status' => $order['status']]);
-            } else {
-                echo json_encode(['success' => false, 'message' => 'Order not found or you do not have permission.']);
-            }
-            exit();
         default:
             echo json_encode(['success' => false, 'message' => 'Invalid action.']);
             exit();
     }
 }
-if (isset($_POST['action'])) {
+if (isset($_POST['action']) && isLoggedIn()) {
     $action = $_POST['action'];
     $message_type = 'error';
     $message = 'An unknown error occurred.';
-    if (in_array($action, ['login', 'customer_register', 'customer_login'])) {
-    } elseif (!isLoggedIn()) {
-        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-        redirect('login');
-    }
     switch ($action) {
         case 'login':
-            $username = $_POST['username'] ?? '';
-            $password = $_POST['password'] ?? '';
-            $stmt = $conn->prepare("SELECT id, username, password_hash, role FROM users WHERE username = ?");
-            $stmt->bind_param("s", $username);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $user = $result->fetch_assoc();
-            $stmt->close();
-            if ($user && password_verify($password, $user['password_hash'])) {
-                session_regenerate_id(true);
-                $_SESSION['user_id'] = $user['id'];
-                $_SESSION['username'] = $user['username'];
-                $_SESSION['user_role'] = $user['role'];
-                $_SESSION['toast'] = ['type' => 'success', 'message' => 'Welcome, ' . html($user['username']) . '!'];
-                redirect('dashboard');
-            } else {
-                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Invalid username or password.'];
-                redirect('login');
-            }
-            break;
-        case 'customer_login':
-            $email = $_POST['email'] ?? '';
-            $password = $_POST['password'] ?? '';
-            $stmt = $conn->prepare("SELECT id, name, email, password_hash FROM customers WHERE email = ? AND is_active = 1");
-            $stmt->bind_param("s", $email);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $customer = $result->fetch_assoc();
-            $stmt->close();
-            if ($customer && password_verify($password, $customer['password_hash'])) {
-                session_regenerate_id(true);
-                $_SESSION['customer_id'] = $customer['id'];
-                $_SESSION['customer_name'] = $customer['name'];
-                $_SESSION['user_role'] = 'customer';
-                $_SESSION['toast'] = ['type' => 'success', 'message' => 'Welcome, ' . html($customer['name']) . '!'];
-                redirect('customer-dashboard');
-            } else {
-                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Invalid email or password.'];
-                redirect('customer-login');
-            }
-            break;
-        case 'customer_register':
-            $name = $_POST['name'] ?? '';
-            $email = $_POST['email'] ?? '';
-            $phone = $_POST['phone'] ?? '';
-            $password = $_POST['password'] ?? '';
-            $confirm_password = $_POST['confirm_password'] ?? '';
-            $address = $_POST['address'] ?? '';
-            if (empty($name) || empty($email) || empty($phone) || empty($password) || empty($confirm_password)) {
-                $message = 'All fields are required.';
-                break;
-            }
-            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                $message = 'Invalid email format.';
-                break;
-            }
-            if ($password !== $confirm_password) {
-                $message = 'Passwords do not match.';
-                break;
-            }
-            if (strlen($password) < 6) {
-                $message = 'Password must be at least 6 characters long.';
-                break;
-            }
-            $stmt_check = $conn->prepare("SELECT id FROM customers WHERE email = ?");
-            $stmt_check->bind_param('s', $email);
-            $stmt_check->execute();
-            if ($stmt_check->get_result()->num_rows > 0) {
-                $message = 'An account with this email already exists.';
-                $stmt_check->close();
-                break;
-            }
-            $stmt_check->close();
-            $password_hash = password_hash($password, PASSWORD_BCRYPT);
-            $stmt = $conn->prepare("INSERT INTO customers (name, phone, email, password_hash, address, is_active) VALUES (?, ?, ?, ?, ?, 1)");
-            $stmt->bind_param("sssss", $name, $phone, $email, $password_hash, $address);
-            if ($stmt->execute()) {
-                $message_type = 'success';
-                $message = 'Registration successful! You can now log in.';
-                redirect('customer-login', ['toast_type' => 'success', 'toast_message' => $message]);
-            } else {
-                $message = 'Failed to register: ' . $stmt->error;
-            }
-            $stmt->close();
             break;
         case 'save_book':
-            if (!isAdmin() && !isStaff()) {
+            if (!isAdmin()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
                 redirect('books');
             }
             $book_id = $_POST['book_id'] ?? null;
-            $name = $_POST['name'];
-            $product_type = $_POST['product_type'];
-            $author = $_POST['author'] ?? null;
+            $title = $_POST['title'];
+            $author = $_POST['author'];
             $category = $_POST['category'];
-            $isbn = $_POST['isbn'] ?? null;
+            $isbn = $_POST['isbn'];
             $publisher = $_POST['publisher'] ?? null;
             $year = $_POST['year'] ?? null;
             $price = $_POST['price'];
             $stock = $_POST['stock'];
             $description = $_POST['description'] ?? null;
             $cover_image_path = $_POST['existing_cover_image'] ?? null;
-            if (empty($name) || empty($product_type) || empty($category) || empty($price) || !isset($stock)) {
-                $message = 'All required product fields must be filled.';
-                break;
-            }
-            if ($product_type === 'book' && (empty($author) || empty($isbn))) {
-                $message = 'For "Book" type, Author and ISBN are required.';
+            if (empty($title) || empty($author) || empty($isbn) || empty($price) || !isset($stock)) {
+                $message = 'All required book fields must be filled.';
                 break;
             }
             if (!is_numeric($price) || $price < 0) {
@@ -1266,23 +1008,23 @@ if (isset($_POST['action'])) {
                 $cover_image_path = null;
             }
             if ($book_id) {
-                $stmt = $conn->prepare("UPDATE books SET name=?, product_type=?, author=?, category=?, isbn=?, publisher=?, year=?, price=?, stock=?, description=?, cover_image=? WHERE id=?");
-                $stmt->bind_param("sssssidddssi", $name, $product_type, $author, $category, $isbn, $publisher, $year, $price, $stock, $description, $cover_image_path, $book_id);
+                $stmt = $conn->prepare("UPDATE books SET title=?, author=?, category=?, isbn=?, publisher=?, year=?, price=?, stock=?, description=?, cover_image=? WHERE id=?");
+                $stmt->bind_param("sssssidddsi", $title, $author, $category, $isbn, $publisher, $year, $price, $stock, $description, $cover_image_path, $book_id);
                 if ($stmt->execute()) {
                     $message_type = 'success';
-                    $message = 'Product updated successfully!';
+                    $message = 'Book updated successfully!';
                 } else {
-                    $message = 'Failed to update product: ' . $stmt->error;
+                    $message = 'Failed to update book: ' . $stmt->error;
                 }
                 $stmt->close();
             } else {
-                $stmt = $conn->prepare("INSERT INTO books (name, product_type, author, category, isbn, publisher, year, price, stock, description, cover_image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-                $stmt->bind_param("sssssiddds", $name, $product_type, $author, $category, $isbn, $publisher, $year, $price, $stock, $description, $cover_image_path);
+                $stmt = $conn->prepare("INSERT INTO books (title, author, category, isbn, publisher, year, price, stock, description, cover_image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                $stmt->bind_param("sssssiddds", $title, $author, $category, $isbn, $publisher, $year, $price, $stock, $description, $cover_image_path);
                 if ($stmt->execute()) {
                     $message_type = 'success';
-                    $message = 'Product added successfully!';
+                    $message = 'Book added successfully!';
                 } else {
-                    $message = 'Failed to add product: ' . $stmt->error;
+                    $message = 'Failed to add book: ' . $stmt->error;
                 }
                 $stmt->close();
             }
@@ -1304,13 +1046,8 @@ if (isset($_POST['action'])) {
                 $po_check_stmt->execute();
                 $has_pos = $po_check_stmt->get_result()->fetch_row()[0] > 0;
                 $po_check_stmt->close();
-                $online_order_check_stmt = $conn->prepare("SELECT COUNT(*) FROM online_order_items WHERE book_id = ?");
-                $online_order_check_stmt->bind_param('i', $book_id);
-                $online_order_check_stmt->execute();
-                $has_online_orders = $online_order_check_stmt->get_result()->fetch_row()[0] > 0;
-                $online_order_check_stmt->close();
-                if ($has_sales || $has_pos || $has_online_orders) {
-                    $message = 'Cannot delete product with existing sales, purchase orders, or online orders.';
+                if ($has_sales || $has_pos) {
+                    $message = 'Cannot delete book with existing sales or purchase orders.';
                     break;
                 }
                 $stmt = $conn->prepare("SELECT cover_image FROM books WHERE id = ?");
@@ -1326,60 +1063,13 @@ if (isset($_POST['action'])) {
                 $stmt->bind_param("i", $book_id);
                 if ($stmt->execute()) {
                     $message_type = 'success';
-                    $message = 'Product deleted successfully!';
+                    $message = 'Book deleted successfully!';
                 } else {
-                    $message = 'Failed to delete product: ' . $stmt->error;
+                    $message = 'Failed to delete book: ' . $stmt->error;
                 }
                 $stmt->close();
             } else {
-                $message = 'Product ID not provided.';
-            }
-            break;
-        case 'quick_sell':
-            if (!isAdmin() && !isStaff()) {
-                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                redirect('books');
-            }
-            $book_id = $_POST['book_id'] ?? null;
-            if (empty($book_id)) {
-                $message = 'Product ID not provided.';
-                break;
-            }
-            $conn->begin_transaction();
-            try {
-                $stmt_book = $conn->prepare("SELECT name, price, stock FROM books WHERE id = ?");
-                $stmt_book->bind_param('i', $book_id);
-                $stmt_book->execute();
-                $book_data = $stmt_book->get_result()->fetch_assoc();
-                $stmt_book->close();
-                if (!$book_data) {
-                    throw new Exception("Product not found.");
-                }
-                if ($book_data['stock'] < 1) {
-                    throw new Exception("Not enough stock for " . html($book_data['name']) . ".");
-                }
-                $user_id = $_SESSION['user_id'];
-                $subtotal = $book_data['price'];
-                $total = $book_data['price'];
-                $stmt_sale = $conn->prepare("INSERT INTO sales (customer_id, user_id, subtotal, discount, total, promotion_code) VALUES (NULL, ?, ?, 0, ?, NULL)");
-                $stmt_sale->bind_param('idd', $user_id, $subtotal, $total);
-                $stmt_sale->execute();
-                $sale_id = $conn->insert_id;
-                $stmt_sale->close();
-                $stmt_sale_item = $conn->prepare("INSERT INTO sale_items (sale_id, book_id, quantity, price_per_unit, discount_per_unit) VALUES (?, ?, 1, ?, 0)");
-                $stmt_sale_item->bind_param('iid', $sale_id, $book_id, $book_data['price']);
-                $stmt_sale_item->execute();
-                $stmt_sale_item->close();
-                $stmt_update_stock = $conn->prepare("UPDATE books SET stock = stock - 1 WHERE id = ?");
-                $stmt_update_stock->bind_param('i', $book_id);
-                $stmt_update_stock->execute();
-                $stmt_update_stock->close();
-                $conn->commit();
-                $message_type = 'success';
-                $message = 'Quick sale completed for ' . html($book_data['name']) . '!';
-            } catch (Exception $e) {
-                $conn->rollback();
-                $message = 'Quick sale failed: ' . $e->getMessage();
+                $message = 'Book ID not provided.';
             }
             break;
         case 'update_stock':
@@ -1397,7 +1087,7 @@ if (isset($_POST['action'])) {
             $stmt->bind_param("ii", $quantity_to_add, $book_id);
             if ($stmt->execute()) {
                 $message_type = 'success';
-                $message = 'Product stock updated successfully!';
+                $message = 'Book stock updated successfully!';
             } else {
                 $message = 'Failed to update stock: ' . $stmt->error;
             }
@@ -1409,18 +1099,9 @@ if (isset($_POST['action'])) {
             $phone = $_POST['phone'] ?? null;
             $email = $_POST['email'] ?? null;
             $address = $_POST['address'] ?? null;
-            $password = $_POST['password'] ?? null;
-            $password_hash = null;
             if (empty($name)) {
                 $message = 'Customer name is required.';
                 break;
-            }
-            if ($password) {
-                if (strlen($password) < 6) {
-                    $message = 'Password must be at least 6 characters long.';
-                    break;
-                }
-                $password_hash = password_hash($password, PASSWORD_BCRYPT);
             }
             if ($email) {
                 $stmt_check = $conn->prepare("SELECT id FROM customers WHERE email = ? AND id != ?");
@@ -1434,13 +1115,8 @@ if (isset($_POST['action'])) {
                 $stmt_check->close();
             }
             if ($customer_id) {
-                if ($password_hash) {
-                    $stmt = $conn->prepare("UPDATE customers SET name=?, phone=?, email=?, password_hash=?, address=? WHERE id=?");
-                    $stmt->bind_param("sssssi", $name, $phone, $email, $password_hash, $address, $customer_id);
-                } else {
-                    $stmt = $conn->prepare("UPDATE customers SET name=?, phone=?, email=?, address=? WHERE id=?");
-                    $stmt->bind_param("ssssi", $name, $phone, $email, $address, $customer_id);
-                }
+                $stmt = $conn->prepare("UPDATE customers SET name=?, phone=?, email=?, address=? WHERE id=?");
+                $stmt->bind_param("ssssi", $name, $phone, $email, $address, $customer_id);
                 if ($stmt->execute()) {
                     $message_type = 'success';
                     $message = 'Customer updated successfully!';
@@ -1449,12 +1125,8 @@ if (isset($_POST['action'])) {
                 }
                 $stmt->close();
             } else {
-                if (!$password_hash) {
-                    $message = 'Password is required for new customer.';
-                    break;
-                }
-                $stmt = $conn->prepare("INSERT INTO customers (name, phone, email, password_hash, address) VALUES (?, ?, ?, ?, ?)");
-                $stmt->bind_param("sssss", $name, $phone, $email, $password_hash, $address);
+                $stmt = $conn->prepare("INSERT INTO customers (name, phone, email, address) VALUES (?, ?, ?, ?)");
+                $stmt->bind_param("ssss", $name, $phone, $email, $address);
                 if ($stmt->execute()) {
                     $message_type = 'success';
                     $message = 'Customer added successfully!';
@@ -1577,7 +1249,7 @@ if (isset($_POST['action'])) {
             }
             $total_cost = 0;
             foreach ($po_items as $item) {
-                $total_cost += $item['quantity'] * $item['cost_per_unit'];
+                $total_cost += $item['quantity'] * $item['cost_per_unit']; // FIX: Was unitCost
             }
             if ($po_id) {
                 $conn->begin_transaction();
@@ -1593,7 +1265,7 @@ if (isset($_POST['action'])) {
                     $stmt->close();
                     $stmt = $conn->prepare("INSERT INTO po_items (po_id, book_id, quantity, cost_per_unit) VALUES (?, ?, ?, ?)");
                     foreach ($po_items as $item) {
-                        $stmt->bind_param("iiid", $po_id, $item['bookId'], $item['quantity'], $item['cost_per_unit']);
+                        $stmt->bind_param("iiid", $po_id, $item['bookId'], $item['quantity'], $item['cost_per_unit']); // FIX: Was unitCost
                         $stmt->execute();
                     }
                     $stmt->close();
@@ -1615,7 +1287,7 @@ if (isset($_POST['action'])) {
                     $stmt->close();
                     $stmt = $conn->prepare("INSERT INTO po_items (po_id, book_id, quantity, cost_per_unit) VALUES (?, ?, ?, ?)");
                     foreach ($po_items as $item) {
-                        $stmt->bind_param("iiid", $po_id, $item['bookId'], $item['quantity'], $item['cost_per_unit']);
+                        $stmt->bind_param("iiid", $po_id, $item['bookId'], $item['quantity'], $item['cost_per_unit']); // FIX: Was unitCost
                         $stmt->execute();
                     }
                     $stmt->close();
@@ -1680,7 +1352,7 @@ if (isset($_POST['action'])) {
                         $stmt_update_po->close();
                         $conn->commit();
                         $message_type = 'success';
-                        $message = 'Purchase Order received and product stock updated!';
+                        $message = 'Purchase Order received and book stock updated!';
                     } else {
                         $message = 'Purchase Order already marked as received.';
                     }
@@ -1700,7 +1372,7 @@ if (isset($_POST['action'])) {
             $promotion_code = $_POST['promotion_code'] ?? null;
             if (empty($promotion_code)) {
                 $promotion_code = null;
-            }
+            } // Add this line
             $cart_items_json = $_POST['cart_items'] ?? '[]';
             $cart_items = json_decode($cart_items_json, true);
             if (empty($cart_items)) {
@@ -1718,7 +1390,7 @@ if (isset($_POST['action'])) {
                     $book_data = $stmt_book->get_result()->fetch_assoc();
                     $stmt_book->close();
                     if (!$book_data || $book_data['stock'] < $cart_item['quantity']) {
-                        throw new Exception("Not enough stock for " . html($cart_item['name']) . ". Available: " . ($book_data['stock'] ?? 0) . ", Needed: " . $cart_item['quantity'] . ".");
+                        throw new Exception("Not enough stock for " . html($cart_item['title']) . ". Available: " . ($book_data['stock'] ?? 0) . ", Needed: " . $cart_item['quantity'] . ".");
                     }
                     $subtotal += $book_data['price'] * $cart_item['quantity'];
                     $cart_item['price_per_unit'] = $book_data['price'];
@@ -1736,11 +1408,9 @@ if (isset($_POST['action'])) {
                         if ($promotion['applies_to'] === 'all') {
                             $discount_amount = ($promotion['type'] === 'percentage') ? ($subtotal * ($promotion['value'] / 100)) : $promotion['value'];
                             $total_discount = min($discount_amount, $subtotal);
-                            if ($subtotal > 0) {
-                                foreach ($cart_items as &$cart_item) {
-                                    $item_subtotal_proportion = ($cart_item['price_per_unit'] * $cart_item['quantity']) / $subtotal;
-                                    $cart_item['discount_per_unit'] = ($total_discount * $item_subtotal_proportion) / $cart_item['quantity'];
-                                }
+                            foreach ($cart_items as &$cart_item) {
+                                $item_subtotal_proportion = ($cart_item['price_per_unit'] * $cart_item['quantity']) / $subtotal;
+                                $cart_item['discount_per_unit'] = ($total_discount * $item_subtotal_proportion);
                             }
                             unset($cart_item);
                         } else if ($promotion['applies_to'] === 'specific-book') {
@@ -1748,8 +1418,8 @@ if (isset($_POST['action'])) {
                                 if ($cart_item['bookId'] == $promotion['applies_to_value']) {
                                     $item_total_price = $cart_item['price_per_unit'] * $cart_item['quantity'];
                                     $discount_amount = ($promotion['type'] === 'percentage') ? ($item_total_price * ($promotion['value'] / 100)) : $promotion['value'];
-                                    $cart_item['discount_per_unit'] = min($discount_amount / $cart_item['quantity'], $cart_item['price_per_unit']);
-                                    $total_discount += ($cart_item['discount_per_unit'] * $cart_item['quantity']);
+                                    $cart_item['discount_per_unit'] = min($discount_amount, $item_total_price);
+                                    $total_discount += $cart_item['discount_per_unit'];
                                 }
                             }
                             unset($cart_item);
@@ -1758,8 +1428,8 @@ if (isset($_POST['action'])) {
                                 if ($cart_item['category'] === $promotion['applies_to_value']) {
                                     $item_total_price = $cart_item['price_per_unit'] * $cart_item['quantity'];
                                     $discount_amount = ($promotion['type'] === 'percentage') ? ($item_total_price * ($promotion['value'] / 100)) : $promotion['value'];
-                                    $cart_item['discount_per_unit'] = min($discount_amount / $cart_item['quantity'], $cart_item['price_per_unit']);
-                                    $total_discount += ($cart_item['discount_per_unit'] * $cart_item['quantity']);
+                                    $cart_item['discount_per_unit'] = min($discount_amount, $item_total_price);
+                                    $total_discount += $cart_item['discount_per_unit'];
                                 }
                             }
                             unset($cart_item);
@@ -1771,7 +1441,7 @@ if (isset($_POST['action'])) {
                 $final_total = $subtotal - $total_discount;
                 $final_total = max(0, $final_total);
                 $stmt_sale = $conn->prepare("INSERT INTO sales (customer_id, user_id, subtotal, discount, total, promotion_code) VALUES (?, ?, ?, ?, ?, ?)");
-                $user_id = $_SESSION['user_id'] ?? null;
+                $user_id = $_SESSION['user_id'];
                 $stmt_sale->bind_param("iiddds", $customer_id, $user_id, $subtotal, $total_discount, $final_total, $promotion_code);
                 $stmt_sale->execute();
                 $sale_id = $conn->insert_id;
@@ -1779,9 +1449,14 @@ if (isset($_POST['action'])) {
                 $stmt_sale_item = $conn->prepare("INSERT INTO sale_items (sale_id, book_id, quantity, price_per_unit, discount_per_unit) VALUES (?, ?, ?, ?, ?)");
                 $stmt_update_stock = $conn->prepare("UPDATE books SET stock = stock - ? WHERE id = ?");
                 foreach ($cart_items as $item) {
-                    $discount_value_per_unit = $item['discount_per_unit'];
+                    // **FIX:** First, calculate the discount per unit and store it in a simple variable.
+                    // This also prevents a "division by zero" error.
+                    $discount_value_per_unit = ($item['quantity'] > 0) ? ($item['discount_per_unit'] / $item['quantity']) : 0;
+
+                    // **FIX:** Then, use that new variable in the function call.
                     $stmt_sale_item->bind_param("iiidd", $sale_id, $item['bookId'], $item['quantity'], $item['price_per_unit'], $discount_value_per_unit);
                     $stmt_sale_item->execute();
+
                     $stmt_update_stock->bind_param("ii", $item['quantity'], $item['bookId']);
                     $stmt_update_stock->execute();
                 }
@@ -1797,190 +1472,6 @@ if (isset($_POST['action'])) {
                 $conn->rollback();
                 $message = 'Sale failed: ' . $e->getMessage();
             }
-            break;
-        case 'place_online_order':
-            if (!isCustomer()) {
-                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                redirect('customer-dashboard');
-            }
-            $customer_id = $_SESSION['customer_id'];
-            $promotion_code = $_POST['promotion_code'] ?? null;
-            if (empty($promotion_code)) {
-                $promotion_code = null;
-            }
-            $cart_items_json = $_POST['cart_items'] ?? '[]';
-            $cart_items = json_decode($cart_items_json, true);
-            if (empty($cart_items)) {
-                $message = 'Cart is empty, cannot place order.';
-                break;
-            }
-            $conn->begin_transaction();
-            try {
-                $subtotal = 0;
-                $total_discount = 0;
-                foreach ($cart_items as &$cart_item) {
-                    $stmt_book = $conn->prepare("SELECT stock, price, category FROM books WHERE id = ?");
-                    $stmt_book->bind_param("i", $cart_item['bookId']);
-                    $stmt_book->execute();
-                    $book_data = $stmt_book->get_result()->fetch_assoc();
-                    $stmt_book->close();
-                    if (!$book_data || $book_data['stock'] < $cart_item['quantity']) {
-                        throw new Exception("Not enough stock for " . html($cart_item['name']) . ". Available: " . ($book_data['stock'] ?? 0) . ", Needed: " . $cart_item['quantity'] . ".");
-                    }
-                    $subtotal += $book_data['price'] * $cart_item['quantity'];
-                    $cart_item['price_per_unit'] = $book_data['price'];
-                    $cart_item['discount_per_unit'] = 0;
-                    $cart_item['category'] = $book_data['category'];
-                }
-                unset($cart_item);
-                if ($promotion_code) {
-                    $stmt_promo = $conn->prepare("SELECT * FROM promotions WHERE code = ? AND start_date <= CURDATE() AND (end_date IS NULL OR end_date >= CURDATE())");
-                    $stmt_promo->bind_param("s", $promotion_code);
-                    $stmt_promo->execute();
-                    $promotion = $stmt_promo->get_result()->fetch_assoc();
-                    $stmt_promo->close();
-                    if ($promotion) {
-                        if ($promotion['applies_to'] === 'all') {
-                            $discount_amount = ($promotion['type'] === 'percentage') ? ($subtotal * ($promotion['value'] / 100)) : $promotion['value'];
-                            $total_discount = min($discount_amount, $subtotal);
-                            if ($subtotal > 0) {
-                                foreach ($cart_items as &$cart_item) {
-                                    $item_subtotal_proportion = ($cart_item['price_per_unit'] * $cart_item['quantity']) / $subtotal;
-                                    $cart_item['discount_per_unit'] = ($total_discount * $item_subtotal_proportion) / $cart_item['quantity'];
-                                }
-                            }
-                            unset($cart_item);
-                        } else if ($promotion['applies_to'] === 'specific-book') {
-                            foreach ($cart_items as &$cart_item) {
-                                if ($cart_item['bookId'] == $promotion['applies_to_value']) {
-                                    $item_total_price = $cart_item['price_per_unit'] * $cart_item['quantity'];
-                                    $discount_amount = ($promotion['type'] === 'percentage') ? ($item_total_price * ($promotion['value'] / 100)) : $promotion['value'];
-                                    $cart_item['discount_per_unit'] = min($discount_amount / $cart_item['quantity'], $cart_item['price_per_unit']);
-                                    $total_discount += ($cart_item['discount_per_unit'] * $cart_item['quantity']);
-                                }
-                            }
-                            unset($cart_item);
-                        } else if ($promotion['applies_to'] === 'specific-category') {
-                            foreach ($cart_items as &$cart_item) {
-                                if ($cart_item['category'] === $promotion['applies_to_value']) {
-                                    $item_total_price = $cart_item['price_per_unit'] * $cart_item['quantity'];
-                                    $discount_amount = ($promotion['type'] === 'percentage') ? ($item_total_price * ($promotion['value'] / 100)) : $promotion['value'];
-                                    $cart_item['discount_per_unit'] = min($discount_amount / $cart_item['quantity'], $cart_item['price_per_unit']);
-                                    $total_discount += ($cart_item['discount_per_unit'] * $cart_item['quantity']);
-                                }
-                            }
-                            unset($cart_item);
-                        }
-                    } else {
-                        $promotion_code = null;
-                    }
-                }
-                $final_total = $subtotal - $total_discount;
-                $final_total = max(0, $final_total);
-                $stmt_order = $conn->prepare("INSERT INTO online_orders (customer_id, subtotal, discount, total, promotion_code, status) VALUES (?, ?, ?, ?, ?, 'pending')");
-                $stmt_order->bind_param("iddds", $customer_id, $subtotal, $total_discount, $final_total, $promotion_code);
-                $stmt_order->execute();
-                $order_id = $conn->insert_id;
-                $stmt_order->close();
-                $stmt_order_item = $conn->prepare("INSERT INTO online_order_items (order_id, book_id, quantity, price_per_unit, discount_per_unit) VALUES (?, ?, ?, ?, ?)");
-                foreach ($cart_items as $item) {
-                    $discount_value_per_unit = $item['discount_per_unit'];
-                    $stmt_order_item->bind_param("iiidd", $order_id, $item['bookId'], $item['quantity'], $item['price_per_unit'], $discount_value_per_unit);
-                    $stmt_order_item->execute();
-                }
-                $stmt_order_item->close();
-                $conn->commit();
-                $_SESSION['cart'] = [];
-                $_SESSION['applied_promotion'] = null;
-                $message_type = 'success';
-                $message = 'Online order placed successfully! Order ID: ' . $order_id . '.';
-            } catch (Exception $e) {
-                $conn->rollback();
-                $message = 'Online order failed: ' . $e->getMessage();
-            }
-            break;
-        case 'approve_online_order':
-            if (!isAdmin() && !isStaff()) {
-                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                redirect('online-orders');
-            }
-            $order_id = $_POST['order_id'] ?? null;
-            if (!$order_id) {
-                $message = 'Order ID not provided.';
-                break;
-            }
-            $conn->begin_transaction();
-            try {
-                $stmt_order = $conn->prepare("SELECT * FROM online_orders WHERE id = ? AND status = 'pending'");
-                $stmt_order->bind_param('i', $order_id);
-                $stmt_order->execute();
-                $order = $stmt_order->get_result()->fetch_assoc();
-                $stmt_order->close();
-                if (!$order) {
-                    throw new Exception("Online order not found or already processed.");
-                }
-                $stmt_items = $conn->prepare("SELECT * FROM online_order_items WHERE order_id = ?");
-                $stmt_items->bind_param('i', $order_id);
-                $stmt_items->execute();
-                $items = $stmt_items->get_result()->fetch_all(MYSQLI_ASSOC);
-                $stmt_items->close();
-                foreach ($items as $item) {
-                    $stmt_book = $conn->prepare("SELECT stock, name FROM books WHERE id = ?");
-                    $stmt_book->bind_param('i', $item['book_id']);
-                    $stmt_book->execute();
-                    $book_data = $stmt_book->get_result()->fetch_assoc();
-                    $stmt_book->close();
-                    if (!$book_data || $book_data['stock'] < $item['quantity']) {
-                        throw new Exception("Not enough stock for " . html($book_data['name']) . " for order " . $order_id . ".");
-                    }
-                }
-                $user_id = $_SESSION['user_id'];
-                $stmt_sale = $conn->prepare("INSERT INTO sales (customer_id, user_id, sale_date, subtotal, discount, total, promotion_code) VALUES (?, ?, ?, ?, ?, ?, ?)");
-                $stmt_sale->bind_param("iisddds", $order['customer_id'], $user_id, $order['order_date'], $order['subtotal'], $order['discount'], $order['total'], $order['promotion_code']);
-                $stmt_sale->execute();
-                $sale_id = $conn->insert_id;
-                $stmt_sale->close();
-                $stmt_sale_item = $conn->prepare("INSERT INTO sale_items (sale_id, book_id, quantity, price_per_unit, discount_per_unit) VALUES (?, ?, ?, ?, ?)");
-                $stmt_update_stock = $conn->prepare("UPDATE books SET stock = stock - ? WHERE id = ?");
-                foreach ($items as $item) {
-                    $stmt_sale_item->bind_param("iiidd", $sale_id, $item['book_id'], $item['quantity'], $item['price_per_unit'], $item['discount_per_unit']);
-                    $stmt_sale_item->execute();
-                    $stmt_update_stock->bind_param("ii", $item['quantity'], $item['book_id']);
-                    $stmt_update_stock->execute();
-                }
-                $stmt_sale_item->close();
-                $stmt_update_stock->close();
-                $stmt_update_order = $conn->prepare("UPDATE online_orders SET status = 'approved', sale_id = ? WHERE id = ?");
-                $stmt_update_order->bind_param('ii', $sale_id, $order_id);
-                $stmt_update_order->execute();
-                $stmt_update_order->close();
-                $conn->commit();
-                $message_type = 'success';
-                $message = 'Online order ' . $order_id . ' approved and converted to sale ' . $sale_id . '!';
-            } catch (Exception $e) {
-                $conn->rollback();
-                $message = 'Failed to approve online order: ' . $e->getMessage();
-            }
-            break;
-        case 'reject_online_order':
-            if (!isAdmin() && !isStaff()) {
-                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                redirect('online-orders');
-            }
-            $order_id = $_POST['order_id'] ?? null;
-            if (!$order_id) {
-                $message = 'Order ID not provided.';
-                break;
-            }
-            $stmt = $conn->prepare("UPDATE online_orders SET status = 'rejected' WHERE id = ? AND status = 'pending'");
-            $stmt->bind_param('i', $order_id);
-            if ($stmt->execute() && $stmt->affected_rows > 0) {
-                $message_type = 'info';
-                $message = 'Online order ' . $order_id . ' rejected.';
-            } else {
-                $message = 'Failed to reject online order ' . $order_id . ' (may already be processed or not found).';
-            }
-            $stmt->close();
             break;
         case 'save_promotion':
             if (!isAdmin()) {
@@ -2008,7 +1499,7 @@ if (isset($_POST['action'])) {
                 break;
             }
             if ($applies_to === 'specific-book' && empty($_POST['promotion_book_id'])) {
-                $message = 'Please select a product for this promotion.';
+                $message = 'Please select a book for this promotion.';
                 break;
             }
             if ($applies_to === 'specific-category' && empty($_POST['promotion_category'])) {
@@ -2144,40 +1635,6 @@ if (isset($_POST['action'])) {
                 $message = 'Expense ID not provided.';
             }
             break;
-        case 'save_settings':
-            if (!isAdmin()) {
-                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                redirect('settings');
-            }
-            $new_settings = [
-                'system_name' => $_POST['system_name'] ?? '',
-                'mission' => $_POST['mission'] ?? '',
-                'vision' => $_POST['vision'] ?? '',
-                'address' => $_POST['address'] ?? '',
-                'phone' => $_POST['phone'] ?? '',
-                'whatsapp_number' => $_POST['whatsapp_number'] ?? '',
-                'email' => $_POST['email'] ?? '',
-                'google_map_embed_url' => $_POST['google_map_embed_url'] ?? '',
-                'facebook_url' => $_POST['facebook_url'] ?? '',
-                'instagram_url' => $_POST['instagram_url'] ?? '',
-                'currency_symbol' => $_POST['currency_symbol'] ?? 'PKR ',
-            ];
-            $conn->begin_transaction();
-            try {
-                $stmt = $conn->prepare("INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?");
-                foreach ($new_settings as $key => $value) {
-                    $stmt->bind_param("sss", $key, $value, $value);
-                    $stmt->execute();
-                }
-                $stmt->close();
-                $conn->commit();
-                $message_type = 'success';
-                $message = 'Settings updated successfully!';
-            } catch (Exception $e) {
-                $conn->rollback();
-                $message = 'Failed to update settings: ' . $e->getMessage();
-            }
-            break;
         case 'import_books_action':
             if (!isAdmin()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
@@ -2191,7 +1648,7 @@ if (isset($_POST['action'])) {
             $file_content = file_get_contents($_FILES['import_books_file']['tmp_name']);
             $books_data = json_decode($file_content, true);
             if (!is_array($books_data)) {
-                $message = 'Invalid JSON file. Expected an array of products.';
+                $message = 'Invalid JSON file. Expected an array of books.';
                 break;
             }
             $new_count = 0;
@@ -2199,37 +1656,25 @@ if (isset($_POST['action'])) {
             $skipped_count = 0;
             $conn->begin_transaction();
             try {
-                $stmt_insert = $conn->prepare("INSERT INTO books (name, product_type, author, category, isbn, publisher, year, price, stock, description, cover_image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-                $stmt_update = $conn->prepare("UPDATE books SET name=?, product_type=?, author=?, category=?, publisher=?, year=?, price=?, stock=?, description=?, cover_image=? WHERE isbn=?");
+                $stmt_insert = $conn->prepare("INSERT INTO books (title, author, category, isbn, publisher, year, price, stock, description, cover_image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                $stmt_update = $conn->prepare("UPDATE books SET title=?, author=?, category=?, publisher=?, year=?, price=?, stock=?, description=?, cover_image=? WHERE isbn=?");
                 foreach ($books_data as $book) {
-                    if (!isset($book['name']) || !isset($book['price']) || !isset($book['stock'])) {
+                    if (!isset($book['isbn']) || !isset($book['title']) || !isset($book['author']) || !isset($book['price']) || !isset($book['stock'])) {
                         $skipped_count++;
                         continue;
                     }
-                    $book['product_type'] = $book['product_type'] ?? 'general';
-                    $book['category'] = $book['category'] ?? 'Uncategorized';
-                    $stmt_check = null;
-                    $existing_book_id = null;
-                    if ($book['product_type'] == 'book' && isset($book['isbn']) && !empty($book['isbn'])) {
-                        $stmt_check = $conn->prepare("SELECT id FROM books WHERE isbn = ?");
-                        $stmt_check->bind_param("s", $book['isbn']);
-                    } else if (isset($book['name']) && !empty($book['name'])) {
-                        $stmt_check = $conn->prepare("SELECT id FROM books WHERE name = ? AND product_type = ?");
-                        $stmt_check->bind_param("ss", $book['name'], $book['product_type']);
-                    }
-                    if ($stmt_check) {
-                        $stmt_check->execute();
-                        $existing_book_id = $stmt_check->get_result()->fetch_assoc()['id'] ?? null;
-                        $stmt_check->close();
-                    }
+                    $stmt_check = $conn->prepare("SELECT id FROM books WHERE isbn = ?");
+                    $stmt_check->bind_param("s", $book['isbn']);
+                    $stmt_check->execute();
+                    $existing_book_id = $stmt_check->get_result()->fetch_assoc()['id'] ?? null;
+                    $stmt_check->close();
                     if ($existing_book_id) {
                         if ($conflict_resolution === 'update') {
                             $stmt_update->bind_param(
-                                "ssssidddsss",
-                                $book['name'],
-                                $book['product_type'],
-                                $book['author'] ?? null,
-                                $book['category'],
+                                "ssssidddss",
+                                $book['title'],
+                                $book['author'],
+                                $book['category'] ?? null,
                                 $book['publisher'] ?? null,
                                 $book['year'] ?? null,
                                 $book['price'],
@@ -2246,11 +1691,10 @@ if (isset($_POST['action'])) {
                     } else {
                         $stmt_insert->bind_param(
                             "sssssiddds",
-                            $book['name'],
-                            $book['product_type'],
-                            $book['author'] ?? null,
-                            $book['category'],
-                            $book['isbn'] ?? null,
+                            $book['title'],
+                            $book['author'],
+                            $book['category'] ?? null,
+                            $book['isbn'],
                             $book['publisher'] ?? null,
                             $book['year'] ?? null,
                             $book['price'],
@@ -2266,10 +1710,10 @@ if (isset($_POST['action'])) {
                 $stmt_update->close();
                 $conn->commit();
                 $message_type = 'success';
-                $message = "Products imported: $new_count new, $updated_count updated, $skipped_count skipped.";
+                $message = "Books imported: $new_count new, $updated_count updated, $skipped_count skipped.";
             } catch (Exception $e) {
                 $conn->rollback();
-                $message = 'Error during product import: ' . $e->getMessage();
+                $message = 'Error during book import: ' . $e->getMessage();
             }
             break;
         case 'import_customers_action':
@@ -2293,10 +1737,10 @@ if (isset($_POST['action'])) {
             $skipped_count = 0;
             $conn->begin_transaction();
             try {
-                $stmt_insert = $conn->prepare("INSERT INTO customers (name, phone, email, password_hash, address, is_active) VALUES (?, ?, ?, ?, ?, ?)");
-                $stmt_update = $conn->prepare("UPDATE customers SET name=?, phone=?, password_hash=?, address=?, is_active=? WHERE email=?");
+                $stmt_insert = $conn->prepare("INSERT INTO customers (name, phone, email, address, is_active) VALUES (?, ?, ?, ?, ?)");
+                $stmt_update = $conn->prepare("UPDATE customers SET name=?, phone=?, address=?, is_active=? WHERE email=?");
                 foreach ($customers_data as $customer) {
-                    if (!isset($customer['name']) || !isset($customer['email']) || !isset($customer['password'])) {
+                    if (!isset($customer['name']) || !isset($customer['email'])) {
                         $skipped_count++;
                         continue;
                     }
@@ -2305,17 +1749,18 @@ if (isset($_POST['action'])) {
                     $stmt_check->execute();
                     $existing_customer_id = $stmt_check->get_result()->fetch_assoc()['id'] ?? null;
                     $stmt_check->close();
-                    $password_hash = password_hash($customer['password'], PASSWORD_BCRYPT);
                     if ($existing_customer_id) {
                         if ($conflict_resolution === 'update') {
+                            // **FIX:** Store values in variables before passing to bind_param
                             $phone = $customer['phone'] ?? null;
                             $address = $customer['address'] ?? null;
                             $is_active = (int)($customer['is_active'] ?? 1);
+
+                            // **FIX:** Use the new variables and the correct type string "sssis"
                             $stmt_update->bind_param(
-                                "ssssis",
+                                "sssis",
                                 $customer['name'],
                                 $phone,
-                                $password_hash,
                                 $address,
                                 $is_active,
                                 $customer['email']
@@ -2326,12 +1771,12 @@ if (isset($_POST['action'])) {
                             $skipped_count++;
                         }
                     } else {
+                        // This part for inserting new customers was already correct
                         $stmt_insert->bind_param(
-                            "sssssi",
+                            "ssssi",
                             $customer['name'],
                             $customer['phone'] ?? null,
                             $customer['email'],
-                            $password_hash,
                             $customer['address'] ?? null,
                             $customer['is_active'] ?? 1
                         );
@@ -2426,7 +1871,7 @@ if (isset($_POST['action'])) {
                 redirect('backup-restore');
             }
             $all_data = [];
-            $tables = ['users', 'books', 'customers', 'suppliers', 'sales', 'sale_items', 'purchase_orders', 'po_items', 'expenses', 'promotions', 'settings', 'online_orders', 'online_order_items'];
+            $tables = ['users', 'books', 'customers', 'suppliers', 'sales', 'sale_items', 'purchase_orders', 'po_items', 'expenses', 'promotions'];
             foreach ($tables as $table) {
                 $result = $conn->query("SELECT * FROM " . $table);
                 if ($result) {
@@ -2436,7 +1881,7 @@ if (isset($_POST['action'])) {
                 }
             }
             header('Content-Type: application/json');
-            header('Content-Disposition: attachment; filename="general_bookshop_data_backup_' . date('Y-m-d') . '.json"');
+            header('Content-Disposition: attachment; filename="bookshop_data_backup_' . date('Y-m-d') . '.json"');
             echo json_encode($all_data, JSON_PRETTY_PRINT);
             exit();
         case 'import_all_data':
@@ -2454,7 +1899,7 @@ if (isset($_POST['action'])) {
                 $message = 'Invalid JSON file. Expected an object with table data.';
                 break;
             }
-            $tables_in_order = ['users', 'books', 'customers', 'suppliers', 'promotions', 'expenses', 'purchase_orders', 'po_items', 'sales', 'sale_items', 'settings', 'online_orders', 'online_order_items'];
+            $tables_in_order = ['users', 'books', 'customers', 'suppliers', 'promotions', 'expenses', 'purchase_orders', 'po_items', 'sales', 'sale_items'];
             $tables_delete_order = array_reverse($tables_in_order);
             $conn->begin_transaction();
             try {
@@ -2538,14 +1983,14 @@ if (isset($_POST['action']) && $_POST['action'] === 'login') {
 }
 if (isset($_POST['action']) && $_POST['action'] === 'customer_login') {
     $email = $_POST['email'] ?? '';
-    $password = $_POST['password'] ?? '';
-    $stmt = $conn->prepare("SELECT id, name, email, password_hash FROM customers WHERE email = ? AND is_active = 1");
+    $phone = $_POST['phone'] ?? '';
+    $stmt = $conn->prepare("SELECT id, name, phone FROM customers WHERE email = ? AND is_active = 1");
     $stmt->bind_param("s", $email);
     $stmt->execute();
     $result = $stmt->get_result();
     $customer = $result->fetch_assoc();
     $stmt->close();
-    if ($customer && password_verify($password, $customer['password_hash'])) {
+    if ($customer && $phone === $customer['phone']) {
         session_regenerate_id(true);
         $_SESSION['customer_id'] = $customer['id'];
         $_SESSION['customer_name'] = $customer['name'];
@@ -2553,7 +1998,7 @@ if (isset($_POST['action']) && $_POST['action'] === 'customer_login') {
         $_SESSION['toast'] = ['type' => 'success', 'message' => 'Welcome, ' . html($customer['name']) . '!'];
         redirect('customer-dashboard');
     } else {
-        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Invalid email or password.'];
+        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Invalid email or phone number.'];
         redirect('customer-login');
     }
 }
@@ -2564,57 +2009,61 @@ $stmt->close();
 if ($user_count == 0) {
     $admin_password = password_hash('admin123', PASSWORD_BCRYPT);
     $staff_password = password_hash('staff123', PASSWORD_BCRYPT);
-    $customer_password = password_hash('customer123', PASSWORD_BCRYPT);
     $conn->begin_transaction();
     try {
         $stmt = $conn->prepare("INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'admin')");
-        $username = 'admin';
+        $username = 'admin'; // Assign to variable
         $stmt->bind_param("ss", $username, $admin_password);
         $stmt->execute();
         $admin_user_id = $conn->insert_id;
         $stmt->close();
+
         $stmt = $conn->prepare("INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'staff')");
-        $username = 'staff';
+        $username = 'staff'; // Assign to variable
         $stmt->bind_param("ss", $username, $staff_password);
         $stmt->execute();
         $staff_user_id = $conn->insert_id;
         $stmt->close();
+
         $current_system_user_id = $admin_user_id;
+
         $sampleBooks = [
-            ['name' => 'The Alchemist', 'product_type' => 'book', 'author' => 'Paulo Coelho', 'category' => 'Fiction', 'isbn' => '978-0061122415', 'publisher' => 'HarperOne', 'year' => 1988, 'price' => 850.00, 'stock' => 12, 'description' => 'A philosophical novel about a young shepherd boy named Santiago who journeys to find a treasure.', 'cover_image' => ''],
-            ['name' => 'Sapiens: A Brief History of Humankind', 'product_type' => 'book', 'author' => 'Yuval Noah Harari', 'category' => 'History', 'isbn' => '978-0062316097', 'publisher' => 'Harper Perennial', 'year' => 2014, 'price' => 1200.00, 'stock' => 7, 'description' => 'Explores the history of humanity from the Stone Age to the twenty-first century.', 'cover_image' => ''],
-            ['name' => 'Blue Ballpoint Pen (Pack of 5)', 'product_type' => 'general', 'author' => NULL, 'category' => 'Stationery', 'isbn' => NULL, 'publisher' => NULL, 'year' => NULL, 'price' => 150.00, 'stock' => 50, 'description' => 'Smooth writing blue ballpoint pens, ideal for office and school.', 'cover_image' => ''],
-            ['name' => 'A4 Notebook (100 Pages)', 'product_type' => 'general', 'author' => NULL, 'category' => 'Stationery', 'isbn' => NULL, 'publisher' => NULL, 'year' => NULL, 'price' => 250.00, 'stock' => 30, 'description' => 'High-quality A4 size notebook with 100 ruled pages.', 'cover_image' => ''],
-            ['name' => '1984', 'product_type' => 'book', 'author' => 'George Orwell', 'category' => 'Dystopian', 'isbn' => '978-0451524935', 'publisher' => 'Signet Classic', 'year' => 1949, 'price' => 600.00, 'stock' => 20, 'description' => 'A dystopian social science fiction novel and cautionary tale.', 'cover_image' => ''],
-            ['name' => 'Sticky Notes (Assorted Colors)', 'product_type' => 'general', 'author' => NULL, 'category' => 'Stationery', 'isbn' => NULL, 'publisher' => NULL, 'year' => NULL, 'price' => 100.00, 'stock' => 45, 'description' => 'Colorful sticky notes for reminders and bookmarks.', 'cover_image' => ''],
+            ['title' => 'The Alchemist', 'author' => 'Paulo Coelho', 'category' => 'Fiction', 'isbn' => '978-0061122415', 'publisher' => 'HarperOne', 'year' => 1988, 'price' => 850.00, 'stock' => 12, 'description' => 'A philosophical novel about a young shepherd boy named Santiago who journeys to find a treasure.', 'cover_image' => ''],
+            ['title' => 'Sapiens: A Brief History of Humankind', 'author' => 'Yuval Noah Harari', 'category' => 'History', 'isbn' => '978-0062316097', 'publisher' => 'Harper Perennial', 'year' => 2014, 'price' => 1200.00, 'stock' => 7, 'description' => 'Explores the history of humanity from the Stone Age to the twenty-first century.', 'cover_image' => ''],
+            ['title' => 'The Art of Thinking Clearly', 'author' => 'Rolf Dobelli', 'category' => 'Self-Help', 'isbn' => '978-0062218391', 'publisher' => 'HarperCollins', 'year' => 2011, 'price' => 700.00, 'stock' => 3, 'description' => '99 ways to improve your decision-making and avoid common thinking errors.', 'cover_image' => ''],
+            ['title' => '1984', 'author' => 'George Orwell', 'category' => 'Dystopian', 'isbn' => '978-0451524935', 'publisher' => 'Signet Classic', 'year' => 1949, 'price' => 600.00, 'stock' => 20, 'description' => 'A dystopian social science fiction novel and cautionary tale.', 'cover_image' => ''],
+            ['title' => 'Rich Dad Poor Dad', 'author' => 'Robert Kiyosaki', 'category' => 'Finance', 'isbn' => '978-0446677455', 'publisher' => 'Plata Publishing', 'year' => 1997, 'price' => 950.00, 'stock' => 4, 'description' => 'Explodes the myth that you need to earn a high income to become rich.', 'cover_image' => ''],
+            ['title' => 'To Kill a Mockingbird', 'author' => 'Harper Lee', 'category' => 'Classic', 'isbn' => '978-0446310789', 'publisher' => 'Grand Central Publishing', 'year' => 1960, 'price' => 750.00, 'stock' => 15, 'description' => 'A novel about the serious issues of rape and racial inequality.', 'cover_image' => ''],
         ];
         $book_ids = [];
-        $stmt = $conn->prepare("INSERT INTO books (name, product_type, author, category, isbn, publisher, year, price, stock, description, cover_image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt = $conn->prepare("INSERT INTO books (title, author, category, isbn, publisher, year, price, stock, description, cover_image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         foreach ($sampleBooks as $book) {
-            $stmt->bind_param("sssssiddds", $book['name'], $book['product_type'], $book['author'], $book['category'], $book['isbn'], $book['publisher'], $book['year'], $book['price'], $book['stock'], $book['description'], $book['cover_image']);
+            $stmt->bind_param("sssssiddds", $book['title'], $book['author'], $book['category'], $book['isbn'], $book['publisher'], $book['year'], $book['price'], $book['stock'], $book['description'], $book['cover_image']);
             $stmt->execute();
             $book_ids[] = $conn->insert_id;
         }
         $stmt->close();
+
         $sampleCustomers = [
-            ['name' => 'Ali Khan', 'phone' => '03001234567', 'email' => 'ali.khan@example.com', 'password_hash' => $customer_password, 'address' => 'Street 5, Sector G-8, Islamabad', 'is_active' => 1],
-            ['name' => 'Sara Ahmed', 'phone' => '03337654321', 'email' => 'sara.ahmed@example.com', 'password_hash' => $customer_password, 'address' => 'House 12, Gulberg III, Lahore', 'is_active' => 1],
-            ['name' => 'Usman Tariq', 'phone' => '03219876543', 'email' => 'usman.tariq@example.com', 'password_hash' => $customer_password, 'address' => 'Block A, DHA Phase V, Karachi', 'is_active' => 1],
-            ['name' => 'Fatima Zohra', 'phone' => '03451122334', 'email' => 'fatima.z@example.com', 'password_hash' => $customer_password, 'address' => 'Apartment 7, F-10 Markaz, Islamabad', 'is_active' => 0],
+            ['name' => 'Ali Khan', 'phone' => '03001234567', 'email' => 'ali.khan@example.com', 'address' => 'Street 5, Sector G-8, Islamabad', 'is_active' => 1],
+            ['name' => 'Sara Ahmed', 'phone' => '03337654321', 'email' => 'sara.ahmed@example.com', 'address' => 'House 12, Gulberg III, Lahore', 'is_active' => 1],
+            ['name' => 'Usman Tariq', 'phone' => '03219876543', 'email' => 'usman.tariq@example.com', 'address' => 'Block A, DHA Phase V, Karachi', 'is_active' => 1],
+            ['name' => 'Fatima Zohra', 'phone' => '03451122334', 'email' => 'fatima.z@example.com', 'address' => 'Apartment 7, F-10 Markaz, Islamabad', 'is_active' => 0],
         ];
         $customer_ids = [];
-        $stmt = $conn->prepare("INSERT INTO customers (name, phone, email, password_hash, address, is_active) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmt = $conn->prepare("INSERT INTO customers (name, phone, email, address, is_active) VALUES (?, ?, ?, ?, ?)");
         foreach ($sampleCustomers as $customer) {
-            $stmt->bind_param("sssssi", $customer['name'], $customer['phone'], $customer['email'], $customer['password_hash'], $customer['address'], $customer['is_active']);
+            $stmt->bind_param("ssssi", $customer['name'], $customer['phone'], $customer['email'], $customer['address'], $customer['is_active']);
             $stmt->execute();
             $customer_ids[] = $conn->insert_id;
         }
         $stmt->close();
+
         $sampleSuppliers = [
             ['name' => 'ABC Publishers', 'contact_person' => 'Zain Ali', 'phone' => '021-34567890', 'email' => 'info@abcpubs.com', 'address' => 'D-34, Main Boulevard, Karachi'],
-            ['name' => 'Global Products Distributors', 'contact_person' => 'Maria Khan', 'phone' => '042-12345678', 'email' => 'sales@globalproducts.pk', 'address' => 'Model Town, Lahore'],
+            ['name' => 'Global Books Distributors', 'contact_person' => 'Maria Khan', 'phone' => '042-12345678', 'email' => 'sales@globalbooks.pk', 'address' => 'Model Town, Lahore'],
             ['name' => 'Local Importers', 'contact_person' => 'Ahmed Raza', 'phone' => '051-98765432', 'email' => 'contact@localimporters.com', 'address' => 'I-8 Markaz, Islamabad'],
-            ['name' => 'Stationery Hub Pvt Ltd', 'contact_person' => 'Hassan Iqbal', 'phone' => '051-5432109', 'email' => 'hassan@stationeryhub.pk', 'address' => 'Blue Area, Islamabad'],
+            ['name' => 'Book Hub Pvt Ltd', 'contact_person' => 'Hassan Iqbal', 'phone' => '051-5432109', 'email' => 'hassan@bookhub.pk', 'address' => 'Blue Area, Islamabad'],
         ];
         $supplier_ids = [];
         $stmt = $conn->prepare("INSERT INTO suppliers (name, contact_person, phone, email, address) VALUES (?, ?, ?, ?, ?)");
@@ -2624,6 +2073,9 @@ if ($user_count == 0) {
             $supplier_ids[] = $conn->insert_id;
         }
         $stmt->close();
+
+        // ... (The rest of the sample data logic for sales, POs, etc. is already correct) ...
+
         $expense_date1 = date('Y-m-d', time() - (3 * 24 * 60 * 60));
         $expense_date2 = date('Y-m-d', time() - (15 * 24 * 60 * 60));
         $expense_date3 = date('Y-m-d', time() - (20 * 24 * 60 * 60));
@@ -2640,8 +2092,9 @@ if ($user_count == 0) {
             $stmt->execute();
         }
         $stmt->close();
+
         $conn->commit();
-        $_SESSION['toast'] = ['type' => 'info', 'message' => 'Initial data (users, products, customers, etc.) added to the database.'];
+        $_SESSION['toast'] = ['type' => 'info', 'message' => 'Initial data (users, books, customers, etc.) added to the database.'];
     } catch (Exception $e) {
         $conn->rollback();
         error_log("Failed to insert initial data: " . $e->getMessage());
@@ -2653,37 +2106,136 @@ if (!isset($_SESSION['cart'])) {
 }
 $page = $_GET['page'] ?? 'home';
 if (isLoggedIn()) {
-    if (($page === 'login' || $page === 'customer-login' || $page === 'customer-register' || $page === 'home')) {
+    if (($page === 'login' || $page === 'customer-login' || $page === 'home')) {
         redirect(isCustomer() ? 'customer-dashboard' : 'dashboard');
     }
 }
-$admin_only_pages = ['suppliers', 'purchase-orders', 'promotions', 'expenses', 'reports', 'backup-restore', 'settings'];
-$staff_restricted_pages = ['customers'];
-$staff_allowed_pages = ['dashboard', 'books', 'cart', 'sales-history', 'online-orders'];
-if (isStaff()) {
-    if (in_array($page, $admin_only_pages)) {
-        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-        redirect('dashboard');
-    }
-}
-$customer_only_pages = ['customer-dashboard', 'online-shop-cart', 'my-orders'];
-if (isCustomer() && !in_array($page, array_merge($customer_only_pages, ['home', 'books-public', 'about', 'contact']))) {
-    $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
+$admin_pages = ['dashboard', 'books', 'customers', 'suppliers', 'purchase-orders', 'cart', 'sales-history', 'promotions', 'expenses', 'reports', 'backup-restore'];
+if (isCustomer() && in_array($page, $admin_pages)) {
     redirect('customer-dashboard');
 }
-$authenticated_pages = array_merge(['dashboard', 'books', 'customers', 'cart', 'sales-history', 'online-orders'], $admin_only_pages, $customer_only_pages);
+$authenticated_pages = ['dashboard', 'books', 'customers', 'suppliers', 'purchase-orders', 'cart', 'sales-history', 'promotions', 'expenses', 'reports', 'backup-restore', 'customer-dashboard'];
 if (!isLoggedIn() && in_array($page, $authenticated_pages)) {
     $_SESSION['toast'] = ['type' => 'info', 'message' => 'Please log in to access this page.'];
-    $redirect_page = ($page === 'customer-dashboard' || $page === 'online-shop-cart' || $page === 'my-orders') ? 'customer-login' : 'login';
+    $redirect_page = ($page === 'customer-dashboard') ? 'customer-login' : 'login';
     redirect($redirect_page);
 }
-$public_settings = [];
-$settings_result = $conn->query("SELECT setting_key, setting_value FROM settings");
-if ($settings_result) {
-    while ($row = $settings_result->fetch_assoc()) {
-        $public_settings[$row['setting_key']] = $row['setting_value'];
-    }
-}
+/*
+-- Database Creation
+CREATE DATABASE IF NOT EXISTS bookshop_management;
+USE bookshop_management;
+-- Table Structure
+CREATE TABLE IF NOT EXISTS users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    role ENUM('admin', 'staff') NOT NULL DEFAULT 'staff',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS books (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    author VARCHAR(255) NOT NULL,
+    category VARCHAR(100),
+    isbn VARCHAR(13) UNIQUE NOT NULL,
+    publisher VARCHAR(255),
+    year INT,
+    price DECIMAL(10, 2) NOT NULL,
+    stock INT NOT NULL DEFAULT 0,
+    description TEXT,
+    cover_image VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS customers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    phone VARCHAR(20),
+    email VARCHAR(255) UNIQUE,
+    address TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS suppliers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    contact_person VARCHAR(255),
+    phone VARCHAR(20),
+    email VARCHAR(255) UNIQUE,
+    address TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS purchase_orders (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    supplier_id INT NOT NULL,
+    user_id INT NOT NULL, -- User who created the PO
+    order_date DATE NOT NULL,
+    expected_date DATE,
+    status ENUM('pending', 'ordered', 'received', 'cancelled') NOT NULL DEFAULT 'pending',
+    total_cost DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE RESTRICT,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+);
+CREATE TABLE IF NOT EXISTS po_items (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    po_id INT NOT NULL,
+    book_id INT NOT NULL,
+    quantity INT NOT NULL,
+    cost_per_unit DECIMAL(10, 2) NOT NULL,
+    FOREIGN KEY (po_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE RESTRICT
+);
+CREATE TABLE IF NOT EXISTS promotions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(50) NOT NULL UNIQUE,
+    type ENUM('percentage', 'fixed') NOT NULL,
+    value DECIMAL(10, 2) NOT NULL,
+    applies_to ENUM('all', 'specific-book', 'specific-category') NOT NULL,
+    applies_to_value VARCHAR(255), -- Book ID, Category Name, or NULL for 'all'
+    start_date DATE NOT NULL,
+    end_date DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS sales (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_id INT, -- NULL for guest sales
+    user_id INT NOT NULL, -- User who made the sale
+    sale_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    subtotal DECIMAL(10, 2) NOT NULL,
+    discount DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    total DECIMAL(10, 2) NOT NULL,
+    promotion_code VARCHAR(50),
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+    FOREIGN KEY (promotion_code) REFERENCES promotions(code) ON DELETE SET NULL
+);
+CREATE TABLE IF NOT EXISTS sale_items (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    sale_id INT NOT NULL,
+    book_id INT NOT NULL,
+    quantity INT NOT NULL,
+    price_per_unit DECIMAL(10, 2) NOT NULL,
+    discount_per_unit DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
+    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE RESTRICT
+);
+CREATE TABLE IF NOT EXISTS expenses (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL, -- User who recorded the expense
+    expense_date DATE NOT NULL,
+    category VARCHAR(100) NOT NULL,
+    description TEXT,
+    amount DECIMAL(10, 2) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+);
+*/
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -2691,27 +2243,25 @@ if ($settings_result) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="A complete General Store & Bookshop Management Web App and Public Website with PHP and MySQL. Manage products, customers, sales, suppliers, purchase orders, reports, and expenses with role-based access control. Browse available products, find out about us, and contact us.">
-    <meta name="keywords" content="General Store, Bookshop, Management, Web App, PHP, MySQL, Products, Books, Stationery, Customers, Sales, Reports, Inventory, Suppliers, Purchase Orders, Expenses, Promotions, Analytics, Admin, Staff, Online Shop, Pakistan Shop, New Products">
+    <meta name="description" content="A complete Bookshop Management Web App and Public Website with PHP and MySQL. Manage books, customers, sales, suppliers, purchase orders, reports, and expenses with role-based access control. Browse available books, find out about us, and contact us.">
+    <meta name="keywords" content="Bookshop, Management, Web App, PHP, MySQL, Books, Customers, Sales, Reports, Inventory, Suppliers, Purchase Orders, Expenses, Promotions, Analytics, Admin, Staff, Online Book Store, Pakistan Books, New Releases">
     <meta name="author" content="Yasin Ullah, Pakistan">
-    <title><?php echo html($public_settings['system_name'] ?? 'General Store & Bookshop'); ?></title>
+    <title>Bookshop Management</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%232a9d8f' d='M18 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2m-1 15H7V5h10v12M9 7h6v2H9V7m0 4h6v2H9v-2m0 4h6v2H9v-2z'/%3E%3C/svg%3E" type="image/svg+xml">
     <style>
         @import url("https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css");
-        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
 
         :root {
             --primary-color: #2a9d8f;
             --primary-dark-color: #218579;
             --accent-color: #f4a261;
-            --secondary-accent-color: #e9c46a;
-            --background-color: #f8f9fa;
+            --background-color: #f5f7fa;
             --surface-color: #ffffff;
-            --text-color: #343a40;
-            --light-text-color: #6c757d;
-            --border-color: #e2e6ea;
-            --shadow-color: rgba(0, 0, 0, 0.08);
-            --danger-color: #dc3545;
+            --text-color: #333;
+            --light-text-color: #666;
+            --border-color: #e0e0e0;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --danger-color: #e76f51;
             --success-color: #28a745;
             --warning-color: #ffc107;
             --info-color: #17a2b8;
@@ -2722,14 +2272,13 @@ if ($settings_result) {
             --primary-color: #55b7a8;
             --primary-dark-color: #4a9d91;
             --accent-color: #f4a261;
-            --secondary-accent-color: #e9c46a;
             --background-color: #2c3e50;
             --surface-color: #34495e;
             --text-color: #ecf0f1;
             --light-text-color: #bdc3c7;
             --border-color: #4a657e;
             --shadow-color: rgba(0, 0, 0, 0.3);
-            --danger-color: #dc3545;
+            --danger-color: #e76f51;
             --success-color: #28a745;
             --warning-color: #ffc107;
             --info-color: #17a2b8;
@@ -2743,7 +2292,7 @@ if ($settings_result) {
         }
 
         body {
-            font-family: 'Poppins', sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: var(--background-color);
             color: var(--text-color);
             line-height: 1.6;
@@ -2754,8 +2303,7 @@ if ($settings_result) {
         }
 
         #app-container,
-        #public-site-container,
-        #login-container {
+        #public-site-container {
             display: flex;
             flex: 1;
             max-width: 1600px;
@@ -2772,84 +2320,6 @@ if ($settings_result) {
             box-shadow: none;
             border-radius: 0;
             max-width: none;
-            background-color: var(--background-color);
-        }
-
-        #login-container {
-            box-shadow: none;
-            border-radius: 0;
-            max-width: none;
-            background-color: var(--background-color);
-            justify-content: center;
-            align-items: center;
-        }
-
-        .global-search-bar {
-            background-color: var(--surface-color);
-            padding: 10px 20px;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            position: sticky;
-            top: 0;
-            z-index: 50;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
-        }
-
-        .global-search-bar input {
-            flex-grow: 1;
-            padding: 8px 12px;
-            border: 1px solid var(--border-color);
-            border-radius: 5px;
-            background-color: var(--background-color);
-            color: var(--text-color);
-            font-size: 0.95em;
-        }
-
-        .global-search-results {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            background-color: var(--surface-color);
-            border: 1px solid var(--border-color);
-            border-top: none;
-            border-radius: 0 0 5px 5px;
-            max-height: 300px;
-            overflow-y: auto;
-            box-shadow: 0 5px 15px var(--shadow-color);
-            z-index: 100;
-            display: none;
-        }
-
-        .global-search-results.active {
-            display: block;
-        }
-
-        .global-search-results div {
-            padding: 10px 15px;
-            cursor: pointer;
-            transition: background-color 0.2s;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .global-search-results div:last-child {
-            border-bottom: none;
-        }
-
-        .global-search-results div:hover {
-            background-color: var(--background-color);
-        }
-
-        .global-search-results .type-label {
-            font-size: 0.8em;
-            color: var(--light-text-color);
-            margin-right: 8px;
-            padding: 3px 6px;
-            background-color: var(--primary-color);
-            color: white;
-            border-radius: 3px;
         }
 
         .public-header {
@@ -2917,102 +2387,88 @@ if ($settings_result) {
 
         .public-content {
             flex-grow: 1;
-            padding: 40px 20px;
+            padding: 40px;
             margin: 20px auto;
             background-color: var(--surface-color);
             border-radius: 8px;
             box-shadow: 0 2px 10px var(--shadow-color);
-            max-width: 1200px;
-            width: 100%;
+            width: 80%;
         }
 
         .hero-section {
             text-align: center;
-            padding: 80px 20px;
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark-color) 100%);
+            padding: 60px 20px;
+            background: linear-gradient(135deg, var(--primary-color), var(--primary-dark-color));
             color: white;
-            border-radius: 12px;
+            border-radius: 8px;
             margin-bottom: 30px;
-            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
         }
 
         .hero-section h1 {
-            font-size: 4em;
-            margin-bottom: 20px;
+            font-size: 3.5em;
+            margin-bottom: 15px;
             font-weight: 700;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
         }
 
         .hero-section p {
-            font-size: 1.4em;
-            margin-bottom: 40px;
-            max-width: 900px;
+            font-size: 1.3em;
+            margin-bottom: 30px;
+            max-width: 800px;
             margin-left: auto;
             margin-right: auto;
-            line-height: 1.5;
         }
 
         .hero-section .btn-primary {
-            padding: 18px 35px;
-            font-size: 1.3em;
-            border-radius: 50px;
-            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.2);
+            padding: 15px 30px;
+            font-size: 1.2em;
         }
 
         .book-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
             gap: 25px;
             margin-top: 30px;
         }
 
         .book-card {
-            background-color: var(--surface-color);
-            border-radius: 10px;
-            box-shadow: 0 4px 15px var(--shadow-color);
+            background-color: var(--background-color);
+            border-radius: 8px;
+            box-shadow: 0 2px 8px var(--shadow-color);
             padding: 15px;
             text-align: center;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
             transition: transform 0.2s ease, box-shadow 0.2s ease;
-            overflow: hidden;
-            border: 1px solid var(--border-color);
         }
 
         .book-card:hover {
-            transform: translateY(-8px);
-            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+            transform: translateY(-5px);
+            box-shadow: 0 4px 12px var(--shadow-color);
         }
 
         .book-card img {
             max-width: 100%;
-            height: 200px;
+            height: 180px;
             object-fit: contain;
-            border-radius: 8px;
-            margin-bottom: 15px;
-            background-color: var(--background-color);
-            padding: 5px;
+            border-radius: 5px;
+            margin-bottom: 10px;
         }
 
         .book-card h3 {
-            font-size: 1.3em;
+            font-size: 1.2em;
             margin-bottom: 5px;
             color: var(--primary-color);
-            font-weight: 600;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            overflow: hidden;
         }
 
         .book-card p {
-            font-size: 0.95em;
+            font-size: 0.9em;
             color: var(--light-text-color);
             margin-bottom: 10px;
         }
 
         .book-card .price {
-            font-size: 1.2em;
+            font-size: 1.1em;
             font-weight: bold;
             color: var(--accent-color);
             margin-top: auto;
@@ -3020,13 +2476,12 @@ if ($settings_result) {
         }
 
         .book-card .stock-info {
-            font-size: 0.85em;
+            font-size: 0.8em;
             color: var(--light-text-color);
-            padding-bottom: 10px;
         }
 
         .book-card .stock-info.low {
-            color: var(--warning-color);
+            color: var(--danger-color);
             font-weight: bold;
         }
 
@@ -3034,20 +2489,6 @@ if ($settings_result) {
             color: var(--danger-color);
             font-weight: bold;
             text-decoration: line-through;
-        }
-
-        .public-product-actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-            flex-wrap: wrap;
-            justify-content: center;
-        }
-
-        .public-product-actions .btn {
-            flex-grow: 1;
-            padding: 8px 12px;
-            font-size: 0.9em;
         }
 
         .public-footer {
@@ -3066,7 +2507,7 @@ if ($settings_result) {
         }
 
         aside.sidebar {
-            width: 280px;
+            width: 250px;
             background-color: var(--surface-color);
             padding: 20px;
             box-shadow: 2px 0 5px var(--shadow-color);
@@ -3414,8 +2855,8 @@ if ($settings_result) {
         }
 
         .low-stock {
-            background-color: #fff3cd !important;
-            color: var(--warning-color) !important;
+            background-color: #ffe0b2 !important;
+            color: #ff6f00 !important;
         }
 
         [data-theme='dark'] .low-stock {
@@ -3817,13 +3258,6 @@ if ($settings_result) {
             padding: 12px;
         }
 
-        .table-responsive {
-            display: block;
-            width: 100%;
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-        }
-
         @media (max-width: 992px) {
             aside.sidebar {
                 width: 200px;
@@ -3985,17 +3419,6 @@ if ($settings_result) {
             .book-grid {
                 grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
             }
-
-            .global-search-bar {
-                position: static;
-                flex-wrap: wrap;
-            }
-
-            .global-search-results {
-                left: 0;
-                right: 0;
-                width: 100%;
-            }
         }
 
         @media (max-width: 480px) {
@@ -4007,313 +3430,15 @@ if ($settings_result) {
         .hamburger-menu {
             display: none;
         }
-
-        .whatsapp-btn {
-            background-color: #25d366;
-            color: white;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 12px;
-            border-radius: 5px;
-            text-decoration: none;
-            font-size: 0.9em;
-            transition: background-color 0.3s;
-        }
-
-        .whatsapp-btn:hover {
-            background-color: #128c7e;
-        }
-
-        .about-header,
-        .contact-header {
-            text-align: center;
-            padding: 60px 20px;
-            background: linear-gradient(135deg, var(--primary-color), var(--primary-dark-color));
-            color: white;
-            border-radius: 8px;
-            margin-bottom: 40px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-        }
-
-        .about-header h1,
-        .contact-header h1 {
-            font-size: 3em;
-            margin-bottom: 10px;
-            font-weight: 700;
-        }
-
-        .about-header p,
-        .contact-header p {
-            font-size: 1.2em;
-            opacity: 0.95;
-            max-width: 700px;
-            margin: 0 auto;
-        }
-
-        .mission-vision-container {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 30px;
-            margin-bottom: 50px;
-        }
-
-        .mv-card {
-            background: var(--surface-color);
-            padding: 35px;
-            border-radius: 12px;
-            box-shadow: 0 5px 20px var(--shadow-color);
-            text-align: center;
-            border-top: 5px solid var(--accent-color);
-            transition: transform 0.3s;
-            border-left: 1px solid var(--border-color);
-            border-right: 1px solid var(--border-color);
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .mv-card:hover {
-            transform: translateY(-8px);
-        }
-
-        .mv-card i {
-            font-size: 3em;
-            color: var(--accent-color);
-            margin-bottom: 20px;
-        }
-
-        .mv-card h3 {
-            font-size: 1.5em;
-            margin-bottom: 15px;
-            color: var(--primary-color);
-        }
-
-        .features-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-            gap: 25px;
-            margin-top: 30px;
-        }
-
-        .feature-item {
-            display: flex;
-            align-items: flex-start;
-            gap: 15px;
-            padding: 25px;
-            background: var(--background-color);
-            border-radius: 10px;
-            transition: background 0.3s;
-        }
-
-        .feature-item:hover {
-            background: var(--surface-color);
-            box-shadow: 0 2px 10px var(--shadow-color);
-        }
-
-        .feature-item i {
-            font-size: 2em;
-            color: var(--primary-color);
-        }
-
-        .feature-item h4 {
-            margin-bottom: 5px;
-            font-size: 1.1em;
-            color: var(--text-color);
-        }
-
-        .feature-item p {
-            font-size: 0.9em;
-            color: var(--light-text-color);
-            margin: 0;
-            line-height: 1.5;
-        }
-
-        .contact-wrapper {
-            display: grid;
-            grid-template-columns: 1fr 1.5fr;
-            gap: 40px;
-            margin-bottom: 40px;
-        }
-
-        @media(max-width: 850px) {
-            .contact-wrapper {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        .contact-info-box {
-            background: var(--primary-color);
-            color: white;
-            padding: 40px;
-            border-radius: 12px;
-            box-shadow: 0 10px 30px rgba(42, 157, 143, 0.3);
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-        }
-
-        .contact-info-item {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            margin-bottom: 30px;
-        }
-
-        .contact-info-item:last-child {
-            margin-bottom: 0;
-        }
-
-        .contact-info-item i {
-            font-size: 1.4em;
-            background: rgba(255, 255, 255, 0.2);
-            padding: 12px;
-            border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            flex-shrink: 0;
-        }
-
-        .contact-info-item div h4 {
-            font-size: 0.9em;
-            opacity: 0.8;
-            margin-bottom: 4px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .contact-info-item div p {
-            font-size: 1.1em;
-            font-weight: 600;
-            margin: 0;
-        }
-
-        .contact-info-item a {
-            color: white;
-            text-decoration: none;
-            transition: opacity 0.2s;
-        }
-
-        .contact-info-item a:hover {
-            opacity: 0.8;
-        }
-
-        .contact-form-box {
-            background: var(--surface-color);
-            padding: 40px;
-            border-radius: 12px;
-            box-shadow: 0 5px 20px var(--shadow-color);
-            border: 1px solid var(--border-color);
-        }
-
-        .map-container {
-            height: 450px;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 5px 15px var(--shadow-color);
-            border: 5px solid var(--surface-color);
-        }
-
-        .mobile-header-breadcrumb {
-            display: none;
-        }
-
-        @media (max-width: 768px) {
-            aside.sidebar h2 {
-                display: none;
-            }
-
-            .mobile-header-breadcrumb {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                font-size: 1.1em;
-                font-weight: 600;
-                color: var(--primary-color);
-                margin-left: 10px;
-                flex-grow: 1;
-            }
-
-            .mobile-header-breadcrumb a {
-                color: inherit;
-                text-decoration: none;
-            }
-        }
-
-        .mobile-breadcrumb {
-            display: none;
-        }
-
-        @media (max-width: 768px) {
-            #app-container {
-                flex-direction: column;
-                margin: 0;
-            }
-
-            aside.sidebar {
-                width: 100%;
-                height: auto;
-                padding: 10px 15px;
-                flex-direction: row !important;
-                justify-content: flex-start !important;
-                align-items: center !important;
-                position: sticky;
-                top: 0;
-                z-index: 1000;
-            }
-
-            .mobile-breadcrumb,
-            .mobile-header-breadcrumb {
-                display: none !important;
-            }
-
-            aside.sidebar h2 {
-                display: block !important;
-                margin: 0 0 0 15px !important;
-                font-size: 1.1em !important;
-                border-bottom: none !important;
-                padding-bottom: 0 !important;
-                white-space: nowrap;
-            }
-
-            .hamburger-menu {
-                display: block !important;
-                order: -1;
-            }
-
-            aside.sidebar .user-info,
-            aside.sidebar .dark-mode-toggle {
-                display: none;
-            }
-
-            aside.sidebar.active .user-info,
-            aside.sidebar.active .dark-mode-toggle {
-                display: block;
-            }
-        }
-
-        .table-responsive {
-            display: block;
-            width: 100%;
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-        }
-
-        main.content {
-            width: 100%;
-            max-width: 100vw;
-            overflow-x: hidden;
-        }
     </style>
 </head>
 
 <body>
-    <?php if ($page === 'login' || $page === 'customer-login' || $page === 'customer-register') : ?>
+    <?php if ($page === 'login' || $page === 'customer-login') : ?>
         <div id="login-container">
             <div class="login-card">
                 <?php if ($page === 'login') : ?>
-                    <h2><?php echo html($public_settings['system_name'] ?? 'General Store & Bookshop'); ?> Login</h2>
+                    <h2>Bookshop Manager Login</h2>
                     <form action="index.php" method="POST">
                         <input type="hidden" name="action" value="login">
                         <div class="form-group">
@@ -4326,7 +3451,8 @@ if ($settings_result) {
                         </div>
                         <button type="submit" class="btn btn-primary">Login</button>
                     </form>
-                <?php elseif ($page === 'customer-login') : ?>
+                <?php else :
+                ?>
                     <h2>Customer Login</h2>
                     <form action="index.php" method="POST">
                         <input type="hidden" name="action" value="customer_login">
@@ -4335,58 +3461,23 @@ if ($settings_result) {
                             <input type="email" id="email" name="email" required>
                         </div>
                         <div class="form-group">
-                            <label for="password">Password</label>
-                            <input type="password" id="password" name="password" required>
+                            <label for="phone">Phone Number (as Password)</label>
+                            <input type="tel" id="phone" name="phone" required>
                         </div>
                         <button type="submit" class="btn btn-primary">Login</button>
                     </form>
-                    <p style="margin-top: 20px;">Don't have an account? <a href="index.php?page=customer-register">Register here</a></p>
-                <?php else : ?>
-                    <h2>Customer Registration</h2>
-                    <form action="index.php" method="POST">
-                        <input type="hidden" name="action" value="customer_register">
-                        <div class="form-group">
-                            <label for="reg-name">Name</label>
-                            <input type="text" id="reg-name" name="name" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="reg-email">Email</label>
-                            <input type="email" id="reg-email" name="email" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="reg-phone">Phone</label>
-                            <input type="tel" id="reg-phone" name="phone" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="reg-password">Password</label>
-                            <input type="password" id="reg-password" name="password" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="reg-confirm-password">Confirm Password</label>
-                            <input type="password" id="reg-confirm-password" name="confirm_password" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="reg-address">Address</label>
-                            <textarea id="reg-address" name="address" rows="2"></textarea>
-                        </div>
-                        <button type="submit" class="btn btn-primary">Register</button>
-                    </form>
-                    <p style="margin-top: 20px;">Already have an account? <a href="index.php?page=customer-login">Login here</a></p>
                 <?php endif; ?>
             </div>
         </div>
-    <?php elseif (in_array($page, ['home', 'books-public', 'about', 'contact', 'customer-dashboard', 'online-shop-cart', 'my-orders'])) : ?>
+    <?php elseif (in_array($page, ['home', 'books-public', 'about', 'contact', 'customer-dashboard'])) :
+    ?>
         <div id="public-site-container">
             <header class="public-header">
-                <a href="index.php?page=home" class="logo"><?php echo html($public_settings['system_name'] ?? 'General Store & Bookshop'); ?></a>
+                <a href="index.php?page=home" class="logo">Bookshop.pk</a>
                 <nav>
                     <ul>
                         <li><a href="index.php?page=home" class="nav-link <?php echo $page === 'home' ? 'active' : ''; ?>">Home</a></li>
-                        <li><a href="index.php?page=books-public" class="nav-link <?php echo $page === 'books-public' ? 'active' : ''; ?>">Products</a></li>
-                        <?php if (isCustomer()) : ?>
-                            <li><a href="index.php?page=online-shop-cart" class="nav-link <?php echo $page === 'online-shop-cart' ? 'active' : ''; ?>"><i class="fas fa-shopping-basket"></i> My Cart</a></li>
-                            <li><a href="index.php?page=my-orders" class="nav-link <?php echo $page === 'my-orders' ? 'active' : ''; ?>"><i class="fas fa-receipt"></i> My Orders</a></li>
-                        <?php endif; ?>
+                        <li><a href="index.php?page=books-public" class="nav-link <?php echo $page === 'books-public' ? 'active' : ''; ?>">Books</a></li>
                         <li><a href="index.php?page=about" class="nav-link <?php echo $page === 'about' ? 'active' : ''; ?>">About Us</a></li>
                         <li><a href="index.php?page=contact" class="nav-link <?php echo $page === 'contact' ? 'active' : ''; ?>">Contact Us</a></li>
                     </ul>
@@ -4397,7 +3488,7 @@ if ($settings_result) {
                         <a href="index.php?action=logout" style="color: white; font-weight: 500;">Logout</a>
                     <?php else : ?>
                         <a href="index.php?page=customer-login" style="color: white; font-weight: 500;">Customer Login</a>
-                        <a href="index.php?page=login" class="login-btn">Admin/Staff Login</a>
+                        <a href="index.php?page=login" class="login-btn">Admin Login</a>
                     <?php endif; ?>
                 </div>
             </header>
@@ -4407,12 +3498,9 @@ if ($settings_result) {
                     echo "<div id='initial-toast-data' style='display:none;' data-type='" . html($_SESSION['toast']['type']) . "' data-message='" . html($_SESSION['toast']['message']) . "'></div>";
                     unset($_SESSION['toast']);
                 }
-                if (isset($_GET['toast_type']) && isset($_GET['toast_message'])) {
-                    echo "<div id='initial-toast-data' style='display:none;' data-type='" . html($_GET['toast_type']) . "' data-message='" . html($_GET['toast_message']) . "'></div>";
-                }
                 switch ($page) {
                     case 'home':
-                        $latest_books_query = "SELECT id, name, author, price, cover_image, stock, product_type FROM books WHERE stock > 0 ORDER BY created_at DESC LIMIT 4";
+                        $latest_books_query = "SELECT id, title, author, price, cover_image, stock FROM books WHERE stock > 0 ORDER BY created_at DESC LIMIT 4";
                         $latest_books_result = $conn->query($latest_books_query);
                         $latest_books = [];
                         if ($latest_books_result) {
@@ -4423,31 +3511,28 @@ if ($settings_result) {
                 ?>
                         <section id="public-home" class="page-content active">
                             <div class="hero-section">
-                                <h1>Welcome to <?php echo html($public_settings['system_name'] ?? 'General Store & Bookshop'); ?></h1>
-                                <p><?php echo html($public_settings['mission'] ?? 'Your one-stop destination for the latest and greatest products. Explore our vast collection and find what you need!'); ?></p>
-                                <a href="index.php?page=books-public" class="btn btn-primary">Browse Products <i class="fas fa-arrow-right"></i></a>
+                                <h1>Welcome to Bookshop.pk</h1>
+                                <p>Your one-stop destination for the latest and greatest books. Explore our vast collection and find your next read!</p>
+                                <a href="index.php?page=books-public" class="btn btn-primary">Browse Books <i class="fas fa-arrow-right"></i></a>
                             </div>
                             <div class="card">
                                 <div class="card-header">New Arrivals</div>
                                 <div class="book-grid" id="latest-books-list">
                                     <?php if (!empty($latest_books)) : ?>
-                                        <?php foreach ($latest_books as $product) : ?>
+                                        <?php foreach ($latest_books as $book) : ?>
                                             <div class="book-card">
-                                                <img src="<?php echo $product['cover_image'] ?: 'https://via.placeholder.com/150x200?text=No+Cover'; ?>" alt="<?php echo html($product['name']); ?>">
-                                                <h3><?php echo html($product['name']); ?></h3>
-                                                <p><?php echo ($product['author'] ? 'by ' . html($product['author']) : html($product['product_type'])); ?></p>
-                                                <div class="price"><?php echo format_currency(html($product['price'])); ?></div>
-                                                <div class="stock-info <?php echo $product['stock'] <= 5 ? 'low' : ''; ?> <?php echo $product['stock'] === 0 ? 'out' : ''; ?>">
+                                                <img src="<?php echo $book['cover_image'] ?: 'https://via.placeholder.com/150x200?text=No+Cover'; ?>" alt="<?php echo html($book['title']); ?>">
+                                                <h3><?php echo html($book['title']); ?></h3>
+                                                <p>by <?php echo html($book['author']); ?></p>
+                                                <div class="price"><?php echo format_currency(html($book['price'])); ?></div>
+                                                <div class="stock-info <?php echo $book['stock'] <= 5 ? 'low' : ''; ?> <?php echo $book['stock'] === 0 ? 'out' : ''; ?>">
                                                     <?php
-                                                    if ($product['stock'] > 0) {
-                                                        echo html($product['stock']) . ' In Stock';
+                                                    if ($book['stock'] > 0) {
+                                                        echo html($book['stock']) . ' In Stock';
                                                     } else {
                                                         echo 'Out of Stock';
                                                     }
                                                     ?>
-                                                </div>
-                                                <div class="public-product-actions">
-                                                    <a href="https://wa.me/<?php echo html($public_settings['whatsapp_number'] ?? ''); ?>?text=Hello,%20I%20would%20like%20to%20order%20<?php echo urlencode(html($product['name'])); ?>%20-%20Price:%20<?php echo urlencode(format_currency(html($product['price']))); ?>." target="_blank" class="whatsapp-btn"><i class="fab fa-whatsapp"></i> WhatsApp</a>
                                                 </div>
                                             </div>
                                         <?php endforeach; ?>
@@ -4464,20 +3549,12 @@ if ($settings_result) {
                     ?>
                         <section id="public-books" class="page-content active">
                             <div class="page-header">
-                                <h1>Our Products Collection</h1>
+                                <h1>Our Books Collection</h1>
                             </div>
                             <div class="search-sort-controls card">
                                 <div class="form-group">
-                                    <label for="public-book-search">Search Products</label>
-                                    <input type="text" id="public-book-search" placeholder="Search by name, author, ISBN...">
-                                </div>
-                                <div class="form-group">
-                                    <label for="public-product-type-filter">Product Type</label>
-                                    <select id="public-product-type-filter">
-                                        <option value="all">All Types</option>
-                                        <option value="book">Book</option>
-                                        <option value="general">General Item</option>
-                                    </select>
+                                    <label for="public-book-search">Search Books</label>
+                                    <input type="text" id="public-book-search" placeholder="Search by title, author, ISBN...">
                                 </div>
                                 <div class="form-group">
                                     <label for="public-book-category-filter">Category</label>
@@ -4491,15 +3568,15 @@ if ($settings_result) {
                                 <div class="form-group">
                                     <label for="public-book-sort">Sort By</label>
                                     <select id="public-book-sort">
-                                        <option value="name-asc">Name (A-Z)</option>
-                                        <option value="name-desc">Name (Z-A)</option>
+                                        <option value="title-asc">Title (A-Z)</option>
+                                        <option value="title-desc">Title (Z-A)</option>
                                         <option value="price-asc">Price (Low to High)</option>
                                         <option value="price-desc">Price (High to Low)</option>
                                     </select>
                                 </div>
                             </div>
                             <div class="book-grid" id="public-books-list">
-                                <p>Loading products...</p>
+                                <p>Loading books...</p>
                             </div>
                             <div class="pagination" id="public-books-pagination">
                                 <button id="public-books-prev-page" disabled><i class="fas fa-chevron-left"></i> Previous</button>
@@ -4512,60 +3589,20 @@ if ($settings_result) {
                     case 'about':
                     ?>
                         <section id="public-about" class="page-content active">
-                            <div class="about-header">
-                                <h1>About Us</h1>
-                                <p>Discover the story behind <?php echo html($public_settings['system_name'] ?? 'General Store & Bookshop'); ?> and our commitment to serving you.</p>
+                            <div class="page-header">
+                                <h1>About Bookshop.pk</h1>
                             </div>
-                            <div class="mission-vision-container">
-                                <div class="mv-card">
-                                    <i class="fas fa-bullseye"></i>
-                                    <h3>Our Mission</h3>
-                                    <p><?php echo html($public_settings['mission'] ?? 'To provide a diverse range of products and books to our community, fostering knowledge and meeting everyday needs with excellence.'); ?></p>
-                                </div>
-                                <div class="mv-card">
-                                    <i class="fas fa-eye"></i>
-                                    <h3>Our Vision</h3>
-                                    <p><?php echo html($public_settings['vision'] ?? 'To be the leading general store and bookshop, known for quality, variety, and exceptional customer service.'); ?></p>
-                                </div>
-                                <div class="mv-card">
-                                    <i class="fas fa-history"></i>
-                                    <h3>Our Story</h3>
-                                    <p>Founded with a passion for quality and community, we strive to be more than just a store. We are a hub for knowledge, daily essentials, and connection.</p>
-                                </div>
-                            </div>
-                            <div class="card" style="padding: 40px;">
-                                <h2 style="text-align: center; margin-bottom: 10px; color: var(--primary-color);">Why Choose Us?</h2>
-                                <p style="text-align: center; color: var(--light-text-color); margin-bottom: 30px;">We go the extra mile to ensure your satisfaction.</p>
-                                <div class="features-grid">
-                                    <div class="feature-item">
-                                        <i class="fas fa-check-circle"></i>
-                                        <div>
-                                            <h4>Quality Products</h4>
-                                            <p>Carefully curated items ensuring the best value for your money.</p>
-                                        </div>
-                                    </div>
-                                    <div class="feature-item">
-                                        <i class="fas fa-tags"></i>
-                                        <div>
-                                            <h4>Best Prices</h4>
-                                            <p>Competitive pricing to make essentials and books accessible to all.</p>
-                                        </div>
-                                    </div>
-                                    <div class="feature-item">
-                                        <i class="fas fa-smile"></i>
-                                        <div>
-                                            <h4>Customer First</h4>
-                                            <p>Dedicated support and a seamless shopping experience.</p>
-                                        </div>
-                                    </div>
-                                    <div class="feature-item">
-                                        <i class="fas fa-shipping-fast"></i>
-                                        <div>
-                                            <h4>Fast Delivery</h4>
-                                            <p>Reliable shipping to get your orders to you on time.</p>
-                                        </div>
-                                    </div>
-                                </div>
+                            <div class="card">
+                                <p>Welcome to <strong>Bookshop.pk</strong>, your premier destination for books in Pakistan. We are passionate about reading and committed to bringing a diverse collection of books right to your doorstep.</p>
+                                <p>Founded in 2023, our mission is to foster a love for reading across the nation by providing easy access to a wide range of genres, from classic literature to contemporary bestsellers, educational materials, and children's books. We believe that every book holds a new adventure, a new lesson, or a new perspective, and we strive to make these discoveries accessible to everyone.</p>
+                                <p>At Bookshop.pk, we pride ourselves on:</p>
+                                <ul>
+                                    <li><strong>Extensive Collection:</strong> A carefully curated selection of books from local and international authors.</li>
+                                    <li><strong>Affordable Prices:</strong> Competitive pricing to make reading accessible to all.</li>
+                                    <li><strong>Customer Satisfaction:</strong> Dedicated to providing excellent service and a seamless shopping experience.</li>
+                                    <li><strong>Community Engagement:</strong> Supporting local authors and promoting literary events.</li>
+                                </ul>
+                                <p>Join us on our journey to build a community of readers and make knowledge and imagination readily available. Happy reading!</p>
                             </div>
                         </section>
                     <?php
@@ -4603,232 +3640,37 @@ if ($settings_result) {
                                     </table>
                                 </div>
                             </div>
-                            <div class="card" style="margin-top: 20px;">
-                                <div class="card-header">My Online Orders</div>
-                                <div class="table-responsive">
-                                    <table class="data-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Order ID</th>
-                                                <th>Date</th>
-                                                <th>Items</th>
-                                                <th>Total</th>
-                                                <th>Status</th>
-                                                <th>Actions</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="customer-online-orders-list">
-                                            <tr>
-                                                <td colspan="6">Loading online orders...</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </section>
-                    <?php
-                        break;
-                    case 'online-shop-cart':
-                        $customers_for_checkout = [];
-                        $customers_result = $conn->query("SELECT id, name FROM customers WHERE is_active = 1 ORDER BY name ASC");
-                        if ($customers_result) {
-                            while ($row = $customers_result->fetch_assoc()) {
-                                $customers_for_checkout[] = $row;
-                            }
-                        }
-                    ?>
-                        <section id="online-shop-cart" class="page-content active">
-                            <div class="page-header">
-                                <h1>My Online Shopping Cart</h1>
-                            </div>
-                            <div class="card">
-                                <div class="card-header">My Cart (<span id="online-cart-total-items">0</span> items)</div>
-                                <div class="table-responsive">
-                                    <table class="data-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Product</th>
-                                                <th>Price</th>
-                                                <th>Quantity</th>
-                                                <th>Discount</th>
-                                                <th>Subtotal</th>
-                                                <th>Actions</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="online-cart-items-table">
-                                            <tr>
-                                                <td colspan="6">Cart is empty.</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-                                <div id="online-cart-summary">
-                                    <span>Total:</span>
-                                    <span id="online-cart-grand-total"><?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?> 0.00</span>
-                                </div>
-                                <div id="online-cart-promo-section" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
-                                    <div class="form-group">
-                                        <label for="online-checkout-promotion-code">Promotion Code (Optional)</label>
-                                        <input type="text" id="online-checkout-promotion-code" placeholder="Enter promo code">
-                                        <button type="button" class="btn btn-sm btn-info" id="online-apply-promo-btn" style="margin-top: 5px;">Apply</button>
-                                    </div>
-                                    <p id="online-promo-message" style="color: var(--danger-color); font-size: 0.9em;"></p>
-                                </div>
-                                <div id="online-cart-actions">
-                                    <button class="btn btn-danger" id="online-clear-cart-btn" disabled><i class="fas fa-trash"></i> Clear Cart</button>
-                                    <button class="btn btn-success" id="place-online-order-btn" disabled><i class="fas fa-shopping-basket"></i> Place Order</button>
-                                </div>
-                            </div>
-                        </section>
-                        <div id="online-order-modal" class="modal-overlay">
-                            <div class="modal-content">
-                                <div class="modal-header">
-                                    <h3>Confirm Online Order</h3>
-                                    <button class="modal-close"><i class="fas fa-times"></i></button>
-                                </div>
-                                <form id="online-order-form" method="POST" action="index.php?page=online-shop-cart">
-                                    <p>Please confirm your order details below:</p>
-                                    <div class="form-group">
-                                        <label>Customer Name:</label>
-                                        <input type="text" value="<?php echo html($_SESSION['customer_name'] ?? ''); ?>" readonly>
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Customer Email:</label>
-                                        <input type="text" value="<?php echo html($_SESSION['customer_email'] ?? ''); ?>" readonly>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="online-order-subtotal">Subtotal</label>
-                                        <input type="text" id="online-order-subtotal" readonly>
-                                    </div>
-                                    <div class="form-group" id="online-order-discount-display" style="display: none;">
-                                        <label for="online-order-discount">Discount Applied</label>
-                                        <input type="text" id="online-order-discount" readonly>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="online-order-total">Total Amount</label>
-                                        <input type="text" id="online-order-total" readonly>
-                                    </div>
-                                    <input type="hidden" name="action" value="place_online_order">
-                                    <input type="hidden" name="promotion_code" id="online-order-promotion-code-input">
-                                    <input type="hidden" name="cart_items" id="online-order-cart-items-input">
-                                    <div class="form-actions">
-                                        <button type="button" class="btn btn-secondary modal-close">Cancel</button>
-                                        <button type="submit" class="btn btn-success">Confirm & Place Order</button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    <?php
-                        break;
-                    case 'my-orders':
-                    ?>
-                        <section id="my-orders" class="page-content active">
-                            <div class="page-header">
-                                <h1>My Online Orders</h1>
-                            </div>
-                            <div class="card">
-                                <div class="card-header">My Orders List</div>
-                                <div class="table-responsive">
-                                    <table class="data-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Order ID</th>
-                                                <th>Date</th>
-                                                <th>Items</th>
-                                                <th>Total</th>
-                                                <th>Status</th>
-                                                <th>Actions</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="customer-my-orders-list">
-                                            <tr>
-                                                <td colspan="6">Loading your orders...</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
                         </section>
                     <?php
                         break;
                     case 'contact':
                     ?>
                         <section id="public-contact" class="page-content active">
-                            <div class="contact-header">
-                                <h1>Get in Touch</h1>
-                                <p>We'd love to hear from you. Whether you have a question about products, orders, or just want to say hello!</p>
+                            <div class="page-header">
+                                <h1>Contact Us</h1>
                             </div>
-                            <div class="contact-wrapper">
-                                <div class="contact-info-box">
-                                    <h3 style="color: white; margin-bottom: 30px; border-bottom: 1px solid rgba(255,255,255,0.3); padding-bottom: 15px;">Contact Information</h3>
-                                    <div class="contact-info-item">
-                                        <i class="fas fa-phone-alt"></i>
-                                        <div>
-                                            <h4>Phone</h4>
-                                            <p><a href="tel:<?php echo html($public_settings['phone'] ?? ''); ?>"><?php echo html($public_settings['phone'] ?? 'N/A'); ?></a></p>
-                                        </div>
-                                    </div>
-                                    <div class="contact-info-item">
-                                        <i class="fab fa-whatsapp"></i>
-                                        <div>
-                                            <h4>WhatsApp</h4>
-                                            <p><a href="https://wa.me/<?php echo html($public_settings['whatsapp_number'] ?? ''); ?>" target="_blank"><?php echo html($public_settings['whatsapp_number'] ?? 'N/A'); ?></a></p>
-                                        </div>
-                                    </div>
-                                    <div class="contact-info-item">
-                                        <i class="fas fa-envelope"></i>
-                                        <div>
-                                            <h4>Email</h4>
-                                            <p><a href="mailto:<?php echo html($public_settings['email'] ?? ''); ?>"><?php echo html($public_settings['email'] ?? 'N/A'); ?></a></p>
-                                        </div>
-                                    </div>
-                                    <div class="contact-info-item">
-                                        <i class="fas fa-map-marker-alt"></i>
-                                        <div>
-                                            <h4>Address</h4>
-                                            <p><?php echo nl2br(html($public_settings['address'] ?? 'N/A')); ?></p>
-                                        </div>
-                                    </div>
-                                    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.3);">
-                                        <h4 style="margin-bottom: 15px; opacity: 0.9;">Follow Us</h4>
-                                        <div style="display: flex; gap: 15px;">
-                                            <?php if (!empty($public_settings['facebook_url'])) : ?>
-                                                <a href="<?php echo html($public_settings['facebook_url']); ?>" target="_blank" style="background: white; color: var(--primary-color); width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: transform 0.3s;"><i class="fab fa-facebook-f"></i></a>
-                                            <?php endif; ?>
-                                            <?php if (!empty($public_settings['instagram_url'])) : ?>
-                                                <a href="<?php echo html($public_settings['instagram_url']); ?>" target="_blank" style="background: white; color: var(--primary-color); width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: transform 0.3s;"><i class="fab fa-instagram"></i></a>
-                                            <?php endif; ?>
-                                        </div>
-                                    </div>
+                            <div class="card">
+                                <p>Have questions, feedback, or need assistance? We're here to help!</p>
+                                <p>You can reach us through the following channels:</p>
+                                <div class="form-group">
+                                    <label><strong>Email:</strong></label>
+                                    <p><a href="mailto:info@bookshop.pk">info@bookshop.pk</a></p>
                                 </div>
-                                <div class="contact-form-box">
-                                    <h3 style="color: var(--primary-color); margin-bottom: 20px;">Send us a Message</h3>
-                                    <form onsubmit="event.preventDefault(); alert('Thank you for your message! We will get back to you soon.');">
-                                        <div class="form-group">
-                                            <label>Your Name</label>
-                                            <input type="text" class="form-control" style="width:100%; padding:12px; border:1px solid var(--border-color); border-radius:5px;" required placeholder="John Doe">
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Your Email</label>
-                                            <input type="email" class="form-control" style="width:100%; padding:12px; border:1px solid var(--border-color); border-radius:5px;" required placeholder="john@example.com">
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Subject</label>
-                                            <input type="text" class="form-control" style="width:100%; padding:12px; border:1px solid var(--border-color); border-radius:5px;" required placeholder="Inquiry about...">
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Message</label>
-                                            <textarea class="form-control" rows="5" style="width:100%; padding:12px; border:1px solid var(--border-color); border-radius:5px;" required placeholder="How can we help you?"></textarea>
-                                        </div>
-                                        <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px; font-size: 1.1em;">Send Message</button>
-                                    </form>
+                                <div class="form-group">
+                                    <label><strong>Phone:</strong></label>
+                                    <p><a href="tel:+923001234567">+92 300 1234567</a></p>
                                 </div>
+                                <div class="form-group">
+                                    <label><strong>Address:</strong></label>
+                                    <p>123 Book Lane, Gulberg III,<br>Lahore, Pakistan</p>
+                                </div>
+                                <div class="form-group">
+                                    <label><strong>Business Hours:</strong></label>
+                                    <p>Monday - Saturday: 9:00 AM - 7:00 PM (PST)</p>
+                                    <p>Sunday: Closed</p>
+                                </div>
+                                <p>We look forward to hearing from you!</p>
                             </div>
-                            <?php if (!empty($public_settings['google_map_embed_url'])) : ?>
-                                <div class="map-container">
-                                    <iframe src="<?php echo html($public_settings['google_map_embed_url']); ?>" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>
-                                </div>
-                            <?php endif; ?>
                         </section>
                 <?php
                         break;
@@ -4839,42 +3681,34 @@ if ($settings_result) {
                 ?>
             </main>
             <footer class="public-footer">
-                <p>&copy; <?php echo date('Y'); ?> <?php echo html($public_settings['system_name'] ?? 'General Store & Bookshop'); ?>. All rights reserved. Designed by Yasin Ullah, Pakistan.</p>
+                <p>&copy; <?php echo date('Y'); ?> Bookshop.pk. All rights reserved. Designed by Yasin Ullah, Pakistan.</p>
             </footer>
         </div>
     <?php else : ?>
         <div id="app-container">
             <aside class="sidebar">
                 <button class="hamburger-menu" id="hamburger-menu"><i class="fas fa-bars"></i></button>
-                <div class="mobile-breadcrumb">
-                    <a href="index.php?page=dashboard"><i class="fas fa-home"></i></a>
-                    <span class="separator">/</span>
-                    <span><?php echo html(ucwords(str_replace('-', ' ', $page))); ?></span>
-                </div>
-                <h2><?php echo html($public_settings['system_name'] ?? 'General Store & Bookshop'); ?></h2>
+                <h2>Bookshop Manager</h2>
                 <nav>
                     <ul>
                         <li><a href="index.php?page=dashboard" class="nav-link <?php echo $page === 'dashboard' ? 'active' : ''; ?>"><i class="fas fa-home"></i> Dashboard</a></li>
-                        <li><a href="index.php?page=books" class="nav-link <?php echo $page === 'books' ? 'active' : ''; ?>"><i class="fas fa-box-open"></i> Products</a></li>
+                        <li><a href="index.php?page=books" class="nav-link <?php echo $page === 'books' ? 'active' : ''; ?>"><i class="fas fa-book"></i> Books</a></li>
                         <li><a href="index.php?page=customers" class="nav-link <?php echo $page === 'customers' ? 'active' : ''; ?>"><i class="fas fa-users"></i> Customers</a></li>
                         <?php if (isAdmin()) : ?>
                             <li><a href="index.php?page=suppliers" class="nav-link <?php echo $page === 'suppliers' ? 'active' : ''; ?>"><i class="fas fa-truck-moving"></i> Suppliers</a></li>
                             <li><a href="index.php?page=purchase-orders" class="nav-link <?php echo $page === 'purchase-orders' ? 'active' : ''; ?>"><i class="fas fa-boxes"></i> Purchase Orders</a></li>
                         <?php endif; ?>
-                        <li><a href="index.php?page=cart" class="nav-link <?php echo $page === 'cart' ? 'active' : ''; ?>"><i class="fas fa-shopping-cart"></i> POS (Cart)</a></li>
-                        <li><a href="index.php?page=sales-history" class="nav-link <?php echo $page === 'sales-history' ? 'active' : ''; ?>"><i class="fas fa-receipt"></i> Sales History</a></li>
-                        <li><a href="index.php?page=online-orders" class="nav-link <?php echo $page === 'online-orders' ? 'active' : ''; ?>"><i class="fas fa-globe"></i> Online Orders</a></li>
+                        <li><a href="index.php?page=cart" class="nav-link <?php echo $page === 'cart' || $page === 'sales-history' ? 'active' : ''; ?>"><i class="fas fa-shopping-cart"></i> Cart & Sales</a></li>
                         <?php if (isAdmin()) : ?>
                             <li><a href="index.php?page=promotions" class="nav-link <?php echo $page === 'promotions' ? 'active' : ''; ?>"><i class="fas fa-tag"></i> Promotions</a></li>
                             <li><a href="index.php?page=expenses" class="nav-link <?php echo $page === 'expenses' ? 'active' : ''; ?>"><i class="fas fa-money-bill-wave"></i> Expenses</a></li>
                             <li><a href="index.php?page=reports" class="nav-link <?php echo $page === 'reports' ? 'active' : ''; ?>"><i class="fas fa-chart-line"></i> Reports</a></li>
-                            <li><a href="index.php?page=settings" class="nav-link <?php echo $page === 'settings' ? 'active' : ''; ?>"><i class="fas fa-cog"></i> Settings</a></li>
                             <li><a href="index.php?page=backup-restore" class="nav-link <?php echo $page === 'backup-restore' ? 'active' : ''; ?>"><i class="fas fa-database"></i> Backup/Restore</a></li>
                         <?php endif; ?>
                     </ul>
                 </nav>
                 <div class="user-info">
-                    Logged in as <span><?php echo html($_SESSION['username']); ?> (<?php echo html($_SESSION['user_role']); ?>)</span><br>
+                    Logged in as <span><?php echo html(isCustomer() ? $_SESSION['customer_name'] : $_SESSION['username']); ?> (<?php echo html($_SESSION['user_role']); ?>)</span><br>
                     <a href="index.php?action=logout">Logout</a>
                 </div>
                 <div class="dark-mode-toggle">
@@ -4886,10 +3720,6 @@ if ($settings_result) {
                 </div>
             </aside>
             <main class="content">
-                <div class="global-search-bar">
-                    <input type="text" id="global-search-input" placeholder="Global Search (Products, Customers, Sales ID)...">
-                    <div class="global-search-results"></div>
-                </div>
                 <?php
                 if (isset($_SESSION['toast'])) {
                     echo "<div id='initial-toast-data' style='display:none;' data-type='" . html($_SESSION['toast']['type']) . "' data-message='" . html($_SESSION['toast']['message']) . "'></div>";
@@ -4908,7 +3738,7 @@ if ($settings_result) {
                         $today_sales_total = $stmt_today_sales->get_result()->fetch_row()[0] ?? 0;
                         $stmt_today_sales->close();
                         $recent_sales_query = "SELECT s.id, s.sale_date, c.name AS customer_name, s.total, 
-                                            GROUP_CONCAT(CONCAT(b.name, ' (', si.quantity, ')') SEPARATOR ', ') AS item_names
+                                            GROUP_CONCAT(CONCAT(b.title, ' (', si.quantity, ')') SEPARATOR ', ') AS item_titles
                                             FROM sales s
                                             LEFT JOIN customers c ON s.customer_id = c.id
                                             JOIN sale_items si ON s.id = si.sale_id
@@ -4922,7 +3752,7 @@ if ($settings_result) {
                                 $recent_sales[] = $row;
                             }
                         }
-                        $low_stock_books_query = "SELECT id, name, author, stock, product_type FROM books WHERE stock < 5 ORDER BY stock ASC";
+                        $low_stock_books_query = "SELECT id, title, author, stock FROM books WHERE stock < 5 ORDER BY stock ASC";
                         $low_stock_books_result = $conn->query($low_stock_books_query);
                         $low_stock_books = [];
                         if ($low_stock_books_result) {
@@ -4937,7 +3767,7 @@ if ($settings_result) {
                             </div>
                             <div class="dashboard-grid">
                                 <div class="dashboard-card">
-                                    <h3>Total Products</h3>
+                                    <h3>Total Books</h3>
                                     <p id="total-books-count"><?php echo html($total_books_count); ?></p>
                                 </div>
                                 <div class="dashboard-card">
@@ -4945,7 +3775,7 @@ if ($settings_result) {
                                     <p id="total-customers-count"><?php echo html($total_customers_count); ?></p>
                                 </div>
                                 <div class="dashboard-card">
-                                    <h3>Products Low in Stock</h3>
+                                    <h3>Books Low in Stock</h3>
                                     <p id="low-stock-count" class="<?php echo $low_stock_count > 0 ? 'danger' : ''; ?>"><?php echo html($low_stock_count); ?></p>
                                 </div>
                                 <div class="dashboard-card">
@@ -4971,7 +3801,7 @@ if ($settings_result) {
                                                     <tr>
                                                         <td><?php echo format_date(html($sale['sale_date'])); ?></td>
                                                         <td><?php echo html($sale['customer_name'] ?? 'Guest'); ?></td>
-                                                        <td><?php echo html($sale['item_names']); ?></td>
+                                                        <td><?php echo html($sale['item_titles']); ?></td>
                                                         <td><?php echo format_currency(html($sale['total'])); ?></td>
                                                     </tr>
                                                 <?php endforeach; ?>
@@ -4985,13 +3815,13 @@ if ($settings_result) {
                                 </div>
                             </div>
                             <div class="card">
-                                <div class="card-header">Low Stock Products</div>
+                                <div class="card-header">Low Stock Books</div>
                                 <div class="table-responsive">
                                     <table class="data-table">
                                         <thead>
                                             <tr>
-                                                <th>Name</th>
-                                                <th>Type</th>
+                                                <th>Title</th>
+                                                <th>Author</th>
                                                 <th>Stock</th>
                                                 <th>Actions</th>
                                             </tr>
@@ -5000,8 +3830,8 @@ if ($settings_result) {
                                             <?php if (!empty($low_stock_books)) : ?>
                                                 <?php foreach ($low_stock_books as $book) : ?>
                                                     <tr class="<?php echo $book['stock'] < 5 ? 'low-stock' : ''; ?>">
-                                                        <td><?php echo html($book['name']); ?></td>
-                                                        <td><?php echo html(ucfirst($book['product_type'])); ?></td>
+                                                        <td><?php echo html($book['title']); ?></td>
+                                                        <td><?php echo html($book['author']); ?></td>
                                                         <td><?php echo html($book['stock']); ?></td>
                                                         <td class="actions">
                                                             <button class="btn btn-info btn-sm" onclick="openRestockModal('<?php echo html($book['id']); ?>')"><i class="fas fa-box"></i> Restock</button>
@@ -5010,7 +3840,7 @@ if ($settings_result) {
                                                 <?php endforeach; ?>
                                             <?php else : ?>
                                                 <tr>
-                                                    <td colspan="4">No products currently low in stock.</td>
+                                                    <td colspan="4">No books currently low in stock.</td>
                                                 </tr>
                                             <?php endif; ?>
                                         </tbody>
@@ -5024,28 +3854,28 @@ if ($settings_result) {
                     ?>
                         <section id="books" class="page-content <?php echo $page === 'books' ? 'active' : ''; ?>">
                             <div class="page-header">
-                                <h1>Products Management</h1>
+                                <h1>Books Management</h1>
                                 <div style="display: flex; gap: 10px;">
                                     <?php if (isAdmin()) : ?>
                                         <button class="btn btn-primary" id="add-book-btn"><i class="fas fa-plus"></i> Add New
-                                            Product</button>
+                                            Book</button>
                                         <button class="btn btn-secondary" id="export-books-btn"><i class="fas fa-download"></i> Export
-                                            Products</button>
+                                            Books</button>
                                         <button class="btn btn-secondary" id="import-books-btn"><i class="fas fa-upload"></i> Import
-                                            Products</button>
+                                            Books</button>
                                     <?php endif; ?>
                                 </div>
                             </div>
                             <div class="search-sort-controls card">
                                 <div class="form-group">
-                                    <label for="book-search">Search Products</label>
-                                    <input type="text" id="book-search" placeholder="Search by name, author, ISBN, category...">
+                                    <label for="book-search">Search Books</label>
+                                    <input type="text" id="book-search" placeholder="Search by title, author, ISBN, category...">
                                 </div>
                                 <div class="form-group">
                                     <label for="book-sort">Sort By</label>
                                     <select id="book-sort">
-                                        <option value="name-asc">Name (A-Z)</option>
-                                        <option value="name-desc">Name (Z-A)</option>
+                                        <option value="title-asc">Title (A-Z)</option>
+                                        <option value="title-desc">Title (Z-A)</option>
                                         <option value="price-asc">Price (Low to High)</option>
                                         <option value="price-desc">Price (High to Low)</option>
                                         <option value="stock-asc">Stock (Low to High)</option>
@@ -5058,10 +3888,10 @@ if ($settings_result) {
                                     <thead>
                                         <tr>
                                             <th>Cover</th>
-                                            <th>Name</th>
-                                            <th>Type</th>
+                                            <th>Title</th>
                                             <th>Author</th>
                                             <th>Category</th>
+                                            <th>ISBN</th>
                                             <th>Price</th>
                                             <th>Stock</th>
                                             <th>Actions</th>
@@ -5069,7 +3899,7 @@ if ($settings_result) {
                                     </thead>
                                     <tbody id="books-list">
                                         <tr>
-                                            <td colspan="8">Loading products...</td>
+                                            <td colspan="8">Loading books...</td>
                                         </tr>
                                     </tbody>
                                 </table>
@@ -5083,22 +3913,19 @@ if ($settings_result) {
                     <?php
                         break;
                     case 'customers':
-                        $customers_permission_level = 'view_only';
-                        if (isAdmin()) {
-                            $customers_permission_level = 'full_access';
-                        }
                     ?>
                         <section id="customers" class="page-content <?php echo $page === 'customers' ? 'active' : ''; ?>">
                             <div class="page-header">
                                 <h1>Customers Management</h1>
                                 <div style="display: flex; gap: 10px;">
-                                    <?php if ($customers_permission_level === 'full_access') : ?>
-                                        <button class="btn btn-primary" id="add-customer-btn"><i class="fas fa-plus"></i> Add New
-                                            Customer</button>
+                                    <button class="btn btn-primary" id="add-customer-btn"><i class="fas fa-plus"></i> Add New
+                                        Customer</button>
+                                    <?php if (isAdmin()) : ?>
                                         <button class="btn btn-secondary" id="export-customers-btn"><i class="fas fa-download"></i>
                                             Export Customers</button>
                                         <button class="btn btn-secondary" id="import-customers-btn"><i class="fas fa-upload"></i>
-                                            Import Customers</button>
+                                            Import
+                                            Customers</button>
                                     <?php endif; ?>
                                 </div>
                             </div>
@@ -5163,6 +3990,7 @@ if ($settings_result) {
                             </div>
                             <div class="search-sort-controls card">
                                 <div class="form-group">
+                                    <label for="supplier-search">Search Suppliers</label>
                                     <input type="text" id="supplier-search" placeholder="Search by name, contact, email...">
                                 </div>
                             </div>
@@ -5199,7 +4027,7 @@ if ($settings_result) {
                         }
                     ?>
                         <?php
-                        $all_books_for_po = $conn->query("SELECT id, name, author, price FROM books ORDER BY name ASC")->fetch_all(MYSQLI_ASSOC);
+                        $all_books_for_po = $conn->query("SELECT id, title, author, price FROM books ORDER BY title ASC")->fetch_all(MYSQLI_ASSOC);
                         ?>
                         <section id="purchase-orders" class="page-content <?php echo $page === 'purchase-orders' ? 'active' : ''; ?>">
                             <div class="page-header">
@@ -5266,25 +4094,29 @@ if ($settings_result) {
                     ?>
                         <section id="cart" class="page-content <?php echo $page === 'cart' ? 'active' : ''; ?>">
                             <div class="page-header">
-                                <h1>POS (Cart)</h1>
+                                <h1>Cart & Sales</h1>
                                 <div style="display: flex; gap: 10px;">
                                     <button class="btn btn-secondary" id="view-sales-history-btn"><i class="fas fa-history"></i>
                                         View Sales History</button>
+                                    <?php if (isAdmin()) : ?>
+                                        <button class="btn btn-secondary" id="export-sales-btn"><i class="fas fa-download"></i> Export
+                                            Sales</button>
+                                    <?php endif; ?>
                                 </div>
                             </div>
                             <div class="card">
-                                <div class="card-header">Add Products to Cart</div>
+                                <div class="card-header">Add Books to Cart</div>
                                 <div class="search-sort-controls" style="margin-top: 0;">
                                     <div class="form-group">
-                                        <input type="text" id="book-to-cart-search" placeholder="Search product to add to cart...">
+                                        <input type="text" id="book-to-cart-search" placeholder="Search book to add to cart...">
                                     </div>
                                 </div>
                                 <div class="table-responsive">
                                     <table class="data-table">
                                         <thead>
                                             <tr>
-                                                <th>Name</th>
-                                                <th>Author/Type</th>
+                                                <th>Title</th>
+                                                <th>Author</th>
                                                 <th>Price</th>
                                                 <th>Stock</th>
                                                 <th>Action</th>
@@ -5292,7 +4124,7 @@ if ($settings_result) {
                                         </thead>
                                         <tbody id="books-for-cart-list">
                                             <tr>
-                                                <td colspan="5">Loading products...</td>
+                                                <td colspan="5">Loading books...</td>
                                             </tr>
                                         </tbody>
                                     </table>
@@ -5311,7 +4143,7 @@ if ($settings_result) {
                                     <table class="data-table">
                                         <thead>
                                             <tr>
-                                                <th>Name</th>
+                                                <th>Title</th>
                                                 <th>Price</th>
                                                 <th>Quantity</th>
                                                 <th>Discount</th>
@@ -5328,15 +4160,7 @@ if ($settings_result) {
                                 </div>
                                 <div id="cart-summary">
                                     <span>Total:</span>
-                                    <span id="cart-grand-total"><?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?> 0.00</span>
-                                </div>
-                                <div id="cart-promo-section" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
-                                    <div class="form-group">
-                                        <label for="checkout-promotion-code">Promotion Code (Optional)</label>
-                                        <input type="text" id="checkout-promotion-code" placeholder="Enter promo code">
-                                        <button type="button" class="btn btn-sm btn-info" id="apply-promo-btn" style="margin-top: 5px;">Apply</button>
-                                    </div>
-                                    <p id="promo-message" style="color: var(--danger-color); font-size: 0.9em;"></p>
+                                    <span id="cart-grand-total">PKR 0.00</span>
                                 </div>
                                 <div id="cart-actions">
                                     <button class="btn btn-danger" id="clear-cart-btn" disabled><i class="fas fa-trash"></i> Clear
@@ -5360,6 +4184,11 @@ if ($settings_result) {
                                                 <option value="<?php echo html($customer['id']); ?>"><?php echo html($customer['name']); ?></option>
                                             <?php endforeach; ?>
                                         </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="checkout-promotion-code">Promotion Code (Optional)</label>
+                                        <input type="text" id="checkout-promotion-code" placeholder="Enter promo code">
+                                        <button type="button" class="btn btn-sm btn-info" id="apply-promo-btn" style="margin-top: 5px;">Apply</button>
                                     </div>
                                     <div class="form-group">
                                         <label for="checkout-subtotal">Subtotal</label>
@@ -5392,15 +4221,11 @@ if ($settings_result) {
                             <div class="page-header">
                                 <h1>Sales History</h1>
                                 <button class="btn btn-secondary" id="back-to-cart-btn"><i class="fas fa-arrow-left"></i> Back to
-                                    POS</button>
-                                <?php if (isAdmin()) : ?>
-                                    <button class="btn btn-secondary" id="export-sales-btn"><i class="fas fa-download"></i> Export
-                                        Sales</button>
-                                <?php endif; ?>
+                                    Cart</button>
                             </div>
                             <div class="search-sort-controls card">
                                 <div class="form-group">
-                                    <input type="text" id="sale-search" placeholder="Search by customer name, product name, sale ID...">
+                                    <input type="text" id="sale-search" placeholder="Search by customer name, book title, sale ID...">
                                 </div>
                             </div>
                             <div class="table-responsive card">
@@ -5430,64 +4255,12 @@ if ($settings_result) {
                         </section>
                     <?php
                         break;
-                    case 'online-orders':
-                        if (!isAdmin() && !isStaff()) {
-                            $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                            redirect('dashboard');
-                        }
-                    ?>
-                        <section id="online-orders" class="page-content <?php echo $page === 'online-orders' ? 'active' : ''; ?>">
-                            <div class="page-header">
-                                <h1>Online Orders Management</h1>
-                            </div>
-                            <div class="search-sort-controls card">
-                                <div class="form-group">
-                                    <input type="text" id="online-order-search" placeholder="Search by Order ID, customer name...">
-                                </div>
-                                <div class="form-group">
-                                    <label for="online-order-status-filter">Status</label>
-                                    <select id="online-order-status-filter">
-                                        <option value="pending">Pending</option>
-                                        <option value="approved">Approved</option>
-                                        <option value="rejected">Rejected</option>
-                                        <option value="all">All</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="table-responsive card">
-                                <table class="data-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Order ID</th>
-                                            <th>Date</th>
-                                            <th>Customer</th>
-                                            <th>Items</th>
-                                            <th>Total</th>
-                                            <th>Status</th>
-                                            <th>Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="online-orders-list">
-                                        <tr>
-                                            <td colspan="7">Loading online orders...</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                                <div class="pagination" id="online-orders-pagination">
-                                    <button id="online-orders-prev-page" disabled><i class="fas fa-chevron-left"></i> Previous</button>
-                                    <span id="online-orders-page-info">Page 1 of 1</span>
-                                    <button id="online-orders-next-page" disabled>Next <i class="fas fa-chevron-right"></i></button>
-                                </div>
-                            </div>
-                        </section>
-                    <?php
-                        break;
                     case 'promotions':
                         if (!isAdmin()) {
                             $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
                             redirect('dashboard');
                         }
-                        $all_products = $conn->query("SELECT id, name, author, product_type FROM books ORDER BY name ASC")->fetch_all(MYSQLI_ASSOC);
+                        $all_books = $conn->query("SELECT id, title, author FROM books ORDER BY title ASC")->fetch_all(MYSQLI_ASSOC);
                         $all_categories = $conn->query("SELECT DISTINCT category FROM books WHERE category IS NOT NULL AND category != '' ORDER BY category ASC")->fetch_all(MYSQLI_ASSOC);
                     ?>
                         <section id="promotions" class="page-content <?php echo $page === 'promotions' ? 'active' : ''; ?>">
@@ -5544,7 +4317,7 @@ if ($settings_result) {
                                 </div>
                             </div>
                             <div class="card">
-                                <div class="card-header">Monthly Expenses: <span id="monthly-expenses-total"><?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?> 0.00</span></div>
+                                <div class="card-header">Monthly Expenses: <span id="monthly-expenses-total">PKR 0.00</span></div>
                                 <div class="table-responsive">
                                     <table class="data-table">
                                         <thead>
@@ -5594,9 +4367,9 @@ if ($settings_result) {
                                             <option value="sales-daily">Daily Sales</option>
                                             <option value="sales-weekly">Weekly Sales</option>
                                             <option value="sales-monthly">Monthly Sales</option>
-                                            <option value="best-selling">Best-Selling Products</option>
-                                            <option value="best-selling-authors">Best-Selling Authors (Books Only)</option>
-                                            <option value="low-stock">Low Stock Products</option>
+                                            <option value="best-selling">Best-Selling Books</option>
+                                            <option value="best-selling-authors">Best-Selling Authors</option>
+                                            <option value="low-stock">Low Stock Books</option>
                                             <option value="expenses-summary">Expenses Summary</option>
                                         </select>
                                     </div>
@@ -5641,80 +4414,6 @@ if ($settings_result) {
                         </section>
                     <?php
                         break;
-                    case 'settings':
-                        if (!isAdmin()) {
-                            $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                            redirect('dashboard');
-                        }
-                        $stmt_settings = $conn->prepare("SELECT setting_key, setting_value FROM settings");
-                        $stmt_settings->execute();
-                        $result_settings = $stmt_settings->get_result();
-                        $current_settings = [];
-                        while ($row = $result_settings->fetch_assoc()) {
-                            $current_settings[$row['setting_key']] = $row['setting_value'];
-                        }
-                        $stmt_settings->close();
-                    ?>
-                        <section id="settings" class="page-content <?php echo $page === 'settings' ? 'active' : ''; ?>">
-                            <div class="page-header">
-                                <h1>System Settings</h1>
-                            </div>
-                            <div class="card">
-                                <div class="card-header">General Store Information</div>
-                                <form action="index.php?page=settings" method="POST">
-                                    <input type="hidden" name="action" value="save_settings">
-                                    <div class="form-group">
-                                        <label for="system-name">System Name</label>
-                                        <input type="text" id="system-name" name="system_name" value="<?php echo html($current_settings['system_name'] ?? ''); ?>" required>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="mission">Mission Statement</label>
-                                        <textarea id="mission" name="mission" rows="3"><?php echo html($current_settings['mission'] ?? ''); ?></textarea>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="vision">Vision Statement</label>
-                                        <textarea id="vision" name="vision" rows="3"><?php echo html($current_settings['vision'] ?? ''); ?></textarea>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="address">Address</label>
-                                        <textarea id="address" name="address" rows="3"><?php echo html($current_settings['address'] ?? ''); ?></textarea>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="phone">Phone Number</label>
-                                        <input type="text" id="phone" name="phone" value="<?php echo html($current_settings['phone'] ?? ''); ?>">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="whatsapp-number">WhatsApp Number</label>
-                                        <input type="text" id="whatsapp-number" name="whatsapp_number" value="<?php echo html($current_settings['whatsapp_number'] ?? ''); ?>">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="email">Email</label>
-                                        <input type="email" id="email" name="email" value="<?php echo html($current_settings['email'] ?? ''); ?>">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="google-map-embed-url">Google Map Embed URL</label>
-                                        <input type="url" id="google-map-embed-url" name="google_map_embed_url" value="<?php echo html($current_settings['google_map_embed_url'] ?? ''); ?>">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="facebook-url">Facebook URL</label>
-                                        <input type="url" id="facebook-url" name="facebook_url" value="<?php echo html($current_settings['facebook_url'] ?? ''); ?>">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="instagram-url">Instagram URL</label>
-                                        <input type="url" id="instagram-url" name="instagram_url" value="<?php echo html($current_settings['instagram_url'] ?? ''); ?>">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="currency-symbol">Currency Symbol</label>
-                                        <input type="text" id="currency-symbol" name="currency_symbol" value="<?php echo html($current_settings['currency_symbol'] ?? 'PKR '); ?>" required>
-                                    </div>
-                                    <div class="form-actions">
-                                        <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Settings</button>
-                                    </div>
-                                </form>
-                            </div>
-                        </section>
-                    <?php
-                        break;
                     case 'backup-restore':
                         if (!isAdmin()) {
                             $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
@@ -5727,8 +4426,8 @@ if ($settings_result) {
                             </div>
                             <div class="card">
                                 <div class="card-header">Export All Data</div>
-                                <p>Export all your <?php echo html($public_settings['system_name'] ?? 'General Store & Bookshop'); ?> data (Products, Customers, Sales, Suppliers, POs, Promotions,
-                                    Expenses, Users, Online Orders, Settings) as a JSON file. This file can
+                                <p>Export all your Bookshop Management data (Books, Customers, Sales, Suppliers, POs, Promotions,
+                                    Expenses, Users) as a JSON file. This file can
                                     be used to restore your data later.</p>
                                 <form action="index.php?page=backup-restore" method="POST">
                                     <input type="hidden" name="action" value="export_all_data">
@@ -5738,7 +4437,7 @@ if ($settings_result) {
                             </div>
                             <div class="card" style="margin-top: 30px;">
                                 <div class="card-header">Import All Data</div>
-                                <p>Import a previously exported JSON file to restore your <?php echo html($public_settings['system_name'] ?? 'General Store & Bookshop'); ?> data. <strong>Warning:
+                                <p>Import a previously exported JSON file to restore your Bookshop Management data. <strong>Warning:
                                         This will overwrite ALL existing data!</strong></p>
                                 <form action="index.php?page=backup-restore" method="POST" enctype="multipart/form-data">
                                     <input type="hidden" name="action" value="import_all_data">
@@ -5763,7 +4462,7 @@ if ($settings_result) {
         <div id="book-modal" class="modal-overlay">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h3 id="book-modal-title">Add New Product</h3>
+                    <h3 id="book-modal-title">Add New Book</h3>
                     <button type="button" class="modal-close"><i class="fas fa-times"></i></button>
                 </div>
                 <form id="book-form" action="index.php?page=books" method="POST" enctype="multipart/form-data">
@@ -5772,15 +4471,12 @@ if ($settings_result) {
                     <input type="hidden" id="existing-cover-image" name="existing_cover_image">
                     <div class="flex-group">
                         <div class="form-group">
-                            <label for="book-name">Name</label>
-                            <input type="text" id="book-name" name="name" required>
+                            <label for="book-title">Title</label>
+                            <input type="text" id="book-title" name="title" required>
                         </div>
                         <div class="form-group">
-                            <label for="product-type">Product Type</label>
-                            <select id="product-type" name="product_type" required>
-                                <option value="book">Book</option>
-                                <option value="general">General Item</option>
-                            </select>
+                            <label for="book-author">Author</label>
+                            <input type="text" id="book-author" name="author" required>
                         </div>
                     </div>
                     <div class="flex-group">
@@ -5788,28 +4484,24 @@ if ($settings_result) {
                             <label for="book-category">Category</label>
                             <input type="text" id="book-category" name="category" required>
                         </div>
-                        <div class="form-group" id="book-author-group">
-                            <label for="book-author">Author</label>
-                            <input type="text" id="book-author" name="author">
+                        <div class="form-group">
+                            <label for="book-isbn">ISBN</label>
+                            <input type="text" id="book-isbn" name="isbn" required>
                         </div>
                     </div>
-                    <div class="flex-group" id="book-details-group">
-                        <div class="form-group" id="book-isbn-group">
-                            <label for="book-isbn">ISBN</label>
-                            <input type="text" id="book-isbn" name="isbn">
-                        </div>
-                        <div class="form-group" id="book-publisher-group">
+                    <div class="flex-group">
+                        <div class="form-group">
                             <label for="book-publisher">Publisher</label>
                             <input type="text" id="book-publisher" name="publisher">
                         </div>
-                        <div class="form-group" id="book-year-group">
+                        <div class="form-group">
                             <label for="book-year">Year</label>
                             <input type="number" id="book-year" name="year" min="1000" max="2100">
                         </div>
                     </div>
                     <div class="flex-group">
                         <div class="form-group">
-                            <label for="book-price">Price (<?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?>)</label>
+                            <label for="book-price">Price (PKR)</label>
                             <input type="number" id="book-price" name="price" step="0.01" min="0" required>
                         </div>
                         <div class="form-group">
@@ -5833,7 +4525,7 @@ if ($settings_result) {
                     </div>
                     <div class="form-actions">
                         <button type="button" class="btn btn-secondary modal-close">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Save Product</button>
+                        <button type="submit" class="btn btn-primary">Save Book</button>
                     </div>
                 </form>
             </div>
@@ -5841,7 +4533,7 @@ if ($settings_result) {
         <div id="import-books-modal" class="modal-overlay">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h3>Import Products</h3>
+                    <h3>Import Books</h3>
                     <button type="button" class="modal-close"><i class="fas fa-times"></i></button>
                 </div>
                 <form id="import-books-form" action="index.php?page=books" method="POST" enctype="multipart/form-data">
@@ -5851,19 +4543,19 @@ if ($settings_result) {
                         <input type="file" id="import-books-file" name="import_books_file" accept=".json" required>
                     </div>
                     <div class="form-group">
-                        <label>If product with same ISBN (for books) or Name (for general items) exists:</label>
+                        <label>If book with same ISBN exists:</label>
                         <div>
                             <input type="radio" id="import-books-skip" name="import_conflict_books" value="skip" checked>
                             <label for="import-books-skip">Skip (default)</label>
                         </div>
                         <div>
                             <input type="radio" id="import-books-update" name="import_conflict_books" value="update">
-                            <label for="import-books-update">Update existing product</label>
+                            <label for="import-books-update">Update existing book</label>
                         </div>
                     </div>
                     <div class="form-actions">
                         <button type="button" class="btn btn-secondary modal-close">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Import Products</button>
+                        <button type="submit" class="btn btn-primary">Import Books</button>
                     </div>
                 </form>
             </div>
@@ -5871,15 +4563,15 @@ if ($settings_result) {
         <div id="restock-modal" class="modal-overlay">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h3>Restock Product</h3>
+                    <h3>Restock Book</h3>
                     <button type="button" class="modal-close"><i class="fas fa-times"></i></button>
                 </div>
                 <form id="restock-form" action="index.php?page=books" method="POST">
                     <input type="hidden" name="action" value="update_stock">
                     <input type="hidden" id="restock-book-id" name="book_id">
                     <div class="form-group">
-                        <label for="restock-book-name">Product Name</label>
-                        <input type="text" id="restock-book-name" readonly>
+                        <label for="restock-book-title">Book Title</label>
+                        <input type="text" id="restock-book-title" readonly>
                     </div>
                     <div class="flex-group">
                         <div class="form-group">
@@ -5924,10 +4616,6 @@ if ($settings_result) {
                     <div class="form-group">
                         <label for="customer-address">Address</label>
                         <textarea id="customer-address" name="address" rows="2"></textarea>
-                    </div>
-                    <div class="form-group" id="customer-password-group" style="display: none;">
-                        <label for="customer-password">Password (leave empty to keep current)</label>
-                        <input type="password" id="customer-password" name="password">
                     </div>
                     <div class="form-actions">
                         <button type="button" class="btn btn-secondary modal-close">Cancel</button>
@@ -6110,15 +4798,15 @@ if ($settings_result) {
                     <div class="card-header" style="margin-top: 20px;">Order Items</div>
                     <div class="flex-group">
                         <div class="form-group" style="flex-grow: 3;">
-                            <label for="po-book-select">Add Product</label>
+                            <label for="po-book-select">Add Book</label>
                             <select id="po-book-select" style="width: 100%;">
-                                <option value="">-- Select a Product to Add --</option>
+                                <option value="">-- Select a Book to Add --</option>
                                 <?php foreach ($all_books_for_po as $book) : ?>
                                     <option
                                         value="<?php echo html($book['id']); ?>"
-                                        data-name="<?php echo html($book['name']); ?>"
+                                        data-title="<?php echo html($book['title']); ?>"
                                         data-price="<?php echo html($book['price']); ?>">
-                                        <?php echo html($book['name'] . ($book['author'] ? ' by ' . $book['author'] : '')); ?>
+                                        <?php echo html($book['title'] . ' by ' . $book['author']); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
@@ -6131,7 +4819,7 @@ if ($settings_result) {
                         <table class="data-table">
                             <thead>
                                 <tr>
-                                    <th>Product Name</th>
+                                    <th>Book Title</th>
                                     <th>Quantity</th>
                                     <th>Unit Cost</th>
                                     <th>Subtotal</th>
@@ -6146,7 +4834,7 @@ if ($settings_result) {
                         </table>
                     </div>
                     <div id="po-summary" style="margin-top: 15px; padding-top: 10px; border-top: 1px solid var(--border-color); text-align: right; font-weight: bold;">
-                        Total Cost: <span id="po-grand-total"><?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?> 0.00</span>
+                        Total Cost: <span id="po-grand-total">PKR 0.00</span>
                     </div>
                     <input type="hidden" id="po-items-input" name="po_items">
                     <div class="form-actions">
@@ -6164,7 +4852,8 @@ if ($settings_result) {
                     <button type="button" class="modal-close"><i class="fas fa-times"></i></button>
                 </div>
                 <div id="receipt-content" style="font-family: monospace; font-size: 0.9em; line-height: 1.4;">
-                    <p style="text-align: center; font-size: 1.2em; font-weight: bold; margin-bottom: 10px;"><?php echo html($public_settings['system_name'] ?? 'General Store & Bookshop'); ?> Receipt</p>
+                    <p style="text-align: center; font-size: 1.2em; font-weight: bold; margin-bottom: 10px;">Bookshop
+                        Receipt</p>
                     <hr style="border: 1px dashed var(--border-color); margin: 10px 0;">
                     <p><strong>Sale ID:</strong> <span id="receipt-sale-id"></span></p>
                     <p><strong>Date:</strong> <span id="receipt-date"></span></p>
@@ -6174,7 +4863,7 @@ if ($settings_result) {
                     <table style="width: 100%; border-collapse: collapse; margin-bottom: 10px;">
                         <thead>
                             <tr>
-                                <th style="text-align: left; padding: 2px 0;">Product</th>
+                                <th style="text-align: left; padding: 2px 0;">Book</th>
                                 <th style="text-align: right; padding: 2px 0;">Qty</th>
                                 <th style="text-align: right; padding: 2px 0;">Price</th>
                                 <th style="text-align: right; padding: 2px 0;">Total</th>
@@ -6214,7 +4903,7 @@ if ($settings_result) {
                         <table class="data-table">
                             <thead>
                                 <tr>
-                                    <th>Product</th>
+                                    <th>Book</th>
                                     <th>Qty</th>
                                     <th>Price</th>
                                     <th>Discount</th>
@@ -6266,16 +4955,16 @@ if ($settings_result) {
                         <label for="promotion-applies-to">Applies To</label>
                         <select id="promotion-applies-to" name="applies_to" required>
                             <option value="all">Entire Order</option>
-                            <option value="specific-book">Specific Product</option>
+                            <option value="specific-book">Specific Book</option>
                             <option value="specific-category">Specific Category</option>
                         </select>
                     </div>
                     <div class="form-group" id="promotion-book-group" style="display: none;">
-                        <label for="promotion-book-id">Select Product</label>
+                        <label for="promotion-book-id">Select Book</label>
                         <select id="promotion-book-id" name="promotion_book_id">
-                            <option value="">Select a Product</option>
-                            <?php foreach ($all_products as $product) : ?>
-                                <option value="<?php echo html($product['id']); ?>"><?php echo html($product['name'] . ($product['author'] ? ' by ' . $product['author'] : ' (' . ucfirst($product['product_type']) . ')')); ?></option>
+                            <option value="">Select a Book</option>
+                            <?php foreach ($all_books as $book) : ?>
+                                <option value="<?php echo html($book['id']); ?>"><?php echo html($book['title'] . ' by ' . $book['author']); ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
@@ -6336,7 +5025,7 @@ if ($settings_result) {
                         <textarea id="expense-description" name="description" rows="2"></textarea>
                     </div>
                     <div class="form-group">
-                        <label for="expense-amount">Amount (<?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?>)</label>
+                        <label for="expense-amount">Amount (PKR)</label>
                         <input type="number" id="expense-amount" name="amount" min="0" step="0.01" required>
                     </div>
                     <div class="form-actions">
@@ -6347,57 +5036,6 @@ if ($settings_result) {
             </div>
         </div>
     <?php endif; ?>
-    <div id="view-online-order-modal" class="modal-overlay">
-        <div class="modal-content" style="max-width: 600px;">
-            <div class="modal-header">
-                <h3>Online Order Details</h3>
-                <button type="button" class="modal-close"><i class="fas fa-times"></i></button>
-            </div>
-            <div id="online-order-details-content">
-                <p><strong>Order ID:</strong> <span id="online-order-details-id"></span></p>
-                <p><strong>Date:</strong> <span id="online-order-details-date"></span></p>
-                <p><strong>Customer:</strong> <span id="online-order-details-customer"></span></p>
-                <p><strong>Email:</strong> <span id="online-order-details-email"></span></p>
-                <p><strong>Phone:</strong> <span id="online-order-details-phone"></span></p>
-                <p><strong>Status:</strong> <span id="online-order-details-status"></span></p>
-                <p style="font-weight: bold; margin-top: 15px;">Items:</p>
-                <div class="table-responsive">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>Product</th>
-                                <th>Qty</th>
-                                <th>Price</th>
-                                <th>Discount</th>
-                                <th>Subtotal</th>
-                            </tr>
-                        </thead>
-                        <tbody id="online-order-details-items">
-                        </tbody>
-                    </table>
-                </div>
-                <p style="font-size: 1.1em; font-weight: bold; text-align: right; margin-top: 15px;">Subtotal: <span id="online-order-details-subtotal"></span></p>
-                <p style="font-size: 1.1em; font-weight: bold; text-align: right;" id="online-order-details-discount-line">
-                    Discount:
-                    <span id="online-order-details-discount-value"></span>
-                </p>
-                <p style="font-size: 1.1em; font-weight: bold; text-align: right;">Total: <span id="online-order-details-total"></span></p>
-            </div>
-            <div class="form-actions" style="margin-top: 20px;">
-                <button type="button" class="btn btn-secondary modal-close">Close</button>
-                <form action="index.php?page=online-orders" method="POST" style="display:inline;">
-                    <input type="hidden" name="action" value="approve_online_order">
-                    <input type="hidden" name="order_id" id="approve-order-id">
-                    <button type="submit" class="btn btn-success" id="approve-order-btn"><i class="fas fa-check"></i> Approve</button>
-                </form>
-                <form action="index.php?page=online-orders" method="POST" style="display:inline;">
-                    <input type="hidden" name="action" value="reject_online_order">
-                    <input type="hidden" name="order_id" id="reject-order-id">
-                    <button type="submit" class="btn btn-danger" id="reject-order-btn"><i class="fas fa-times"></i> Reject</button>
-                </form>
-            </div>
-        </div>
-    </div>
     <div id="toast-container"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -6413,7 +5051,6 @@ if ($settings_result) {
         let appliedPromotion = <?php echo json_encode($_SESSION['applied_promotion'] ?? null); ?>;
         let currentReportData = [];
         let reportChartInstance = null;
-        let currentCurrencySymbol = "<?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?>";
         const elements = {
             appContainer: document.getElementById('app-container'),
             sidebar: document.querySelector('.sidebar'),
@@ -6540,17 +5177,11 @@ if ($settings_result) {
             bookModalTitle: document.getElementById('book-modal-title'),
             bookForm: document.getElementById('book-form'),
             bookId: document.getElementById('book-id'),
-            bookName: document.getElementById('book-name'),
-            productType: document.getElementById('product-type'),
-            bookAuthorGroup: document.getElementById('book-author-group'),
+            bookTitle: document.getElementById('book-title'),
             bookAuthor: document.getElementById('book-author'),
             bookCategory: document.getElementById('book-category'),
-            bookDetailsGroup: document.getElementById('book-details-group'),
-            bookIsbnGroup: document.getElementById('book-isbn-group'),
             bookIsbn: document.getElementById('book-isbn'),
-            bookPublisherGroup: document.getElementById('book-publisher-group'),
             bookPublisher: document.getElementById('book-publisher'),
-            bookYearGroup: document.getElementById('book-year-group'),
             bookYear: document.getElementById('book-year'),
             bookPrice: document.getElementById('book-price'),
             bookStock: document.getElementById('book-stock'),
@@ -6563,7 +5194,7 @@ if ($settings_result) {
             restockModal: document.getElementById('restock-modal'),
             restockForm: document.getElementById('restock-form'),
             restockBookId: document.getElementById('restock-book-id'),
-            restockBookName: document.getElementById('restock-book-name'),
+            restockBookTitle: document.getElementById('restock-book-title'),
             restockCurrentStock: document.getElementById('restock-current-stock'),
             restockQuantity: document.getElementById('restock-quantity'),
             customerModal: document.getElementById('customer-modal'),
@@ -6574,8 +5205,6 @@ if ($settings_result) {
             customerPhone: document.getElementById('customer-phone'),
             customerEmail: document.getElementById('customer-email'),
             customerAddress: document.getElementById('customer-address'),
-            customerPasswordGroup: document.getElementById('customer-password-group'),
-            customerPassword: document.getElementById('customer-password'),
             customerHistoryModal: document.getElementById('customer-history-modal'),
             customerHistoryTitle: document.getElementById('customer-history-title'),
             customerHistoryList: document.getElementById('customer-history-list'),
@@ -6655,7 +5284,6 @@ if ($settings_result) {
             expenseAmount: document.getElementById('expense-amount'),
             modalCloseButtons: document.querySelectorAll('.modal-close'),
             publicBookSearch: document.getElementById('public-book-search'),
-            publicProductTypeFilter: document.getElementById('public-product-type-filter'),
             publicBookCategoryFilter: document.getElementById('public-book-category-filter'),
             publicBookSort: document.getElementById('public-book-sort'),
             publicBooksList: document.getElementById('public-books-list'),
@@ -6663,49 +5291,8 @@ if ($settings_result) {
             publicBooksPrevPage: document.getElementById('public-books-prev-page'),
             publicBooksNextPage: document.getElementById('public-books-next-page'),
             publicBooksPageInfo: document.getElementById('public-books-page-info'),
-            globalSearchInput: document.getElementById('global-search-input'),
-            globalSearchResults: document.getElementById('global-search-results'),
-            onlineOrdersList: document.getElementById('online-orders-list'),
-            onlineOrdersPagination: document.getElementById('online-orders-pagination'),
-            onlineOrdersPrevPage: document.getElementById('online-orders-prev-page'),
-            onlineOrdersNextPage: document.getElementById('online-orders-next-page'),
-            onlineOrdersPageInfo: document.getElementById('online-orders-page-info'),
-            onlineOrderSearch: document.getElementById('online-order-search'),
-            onlineOrderStatusFilter: document.getElementById('online-order-status-filter'),
-            viewOnlineOrderModal: document.getElementById('view-online-order-modal'),
-            onlineOrderDetailsId: document.getElementById('online-order-details-id'),
-            onlineOrderDetailsDate: document.getElementById('online-order-details-date'),
-            onlineOrderDetailsCustomer: document.getElementById('online-order-details-customer'),
-            onlineOrderDetailsEmail: document.getElementById('online-order-details-email'),
-            onlineOrderDetailsPhone: document.getElementById('online-order-details-phone'),
-            onlineOrderDetailsStatus: document.getElementById('online-order-details-status'),
-            onlineOrderDetailsItems: document.getElementById('online-order-details-items'),
-            onlineOrderDetailsSubtotal: document.getElementById('online-order-details-subtotal'),
-            onlineOrderDetailsDiscountLine: document.getElementById('online-order-details-discount-line'),
-            onlineOrderDetailsDiscountValue: document.getElementById('online-order-details-discount-value'),
-            onlineOrderDetailsTotal: document.getElementById('online-order-details-total'),
-            approveOrderBtn: document.getElementById('approve-order-btn'),
-            rejectOrderBtn: document.getElementById('reject-order-btn'),
-            approveOrderId: document.getElementById('approve-order-id'),
-            rejectOrderId: document.getElementById('reject-order-id'),
-            onlineCartTotalItems: document.getElementById('online-cart-total-items'),
-            onlineCartItemsTable: document.getElementById('online-cart-items-table'),
-            onlineCartGrandTotal: document.getElementById('online-cart-grand-total'),
-            onlineClearCartBtn: document.getElementById('online-clear-cart-btn'),
-            placeOnlineOrderBtn: document.getElementById('place-online-order-btn'),
-            onlineCheckoutPromotionCode: document.getElementById('online-checkout-promotion-code'),
-            onlineApplyPromoBtn: document.getElementById('online-apply-promo-btn'),
-            onlinePromoMessage: document.getElementById('online-promo-message'),
-            onlineOrderModal: document.getElementById('online-order-modal'),
-            onlineOrderSubtotal: document.getElementById('online-order-subtotal'),
-            onlineOrderDiscountDisplay: document.getElementById('online-order-discount-display'),
-            onlineOrderDiscount: document.getElementById('online-order-discount'),
-            onlineOrderTotal: document.getElementById('online-order-total'),
-            onlineOrderPromotionCodeInput: document.getElementById('online-order-promotion-code-input'),
-            onlineOrderCartItemsInput: document.getElementById('online-order-cart-items-input'),
-            customerMyOrdersList: document.getElementById('customer-my-orders-list'),
         };
-        const formatCurrency = (amount) => `${currentCurrencySymbol}${parseFloat(amount).toFixed(2)}`;
+        const formatCurrency = (amount) => `PKR ${parseFloat(amount).toFixed(2)}`;
         const formatDate = (timestamp) => new Date(timestamp).toLocaleDateString('en-PK', {
             year: 'numeric',
             month: 'short',
@@ -6814,16 +5401,7 @@ if ($settings_result) {
                     next: null,
                     info: null,
                 }
-            },
-            onlineOrders: {
-                currentPage: 1,
-                totalPages: 1,
-                elements: {
-                    prev: null,
-                    next: null,
-                    info: null,
-                }
-            },
+            }
         };
 
         function updatePaginationControls(paginationConfig, totalItems) {
@@ -6857,48 +5435,7 @@ if ($settings_result) {
                 };
             }
         }
-        async function updateDashboard() {
-            if (!elements.totalBooksCount) return;
-            const data = await fetchJSON('index.php?action=get_books_json&limit=1');
-            if (data.success) {
-                elements.totalBooksCount.textContent = data.total_items;
-            }
-            const customerData = await fetchJSON('index.php?action=get_customers_json&status=active&limit=1');
-            if (customerData.success) {
-                elements.totalCustomersCount.textContent = customerData.total_items;
-            }
-            const lowStockData = await fetchJSON('index.php?action=get_books_json&search=&sort=stock-asc&limit=99999');
-            if (lowStockData.success) {
-                const lowStockBooks = lowStockData.books.filter(book => book.stock < 5);
-                elements.lowStockCount.textContent = lowStockBooks.length;
-                elements.lowStockCount.classList.toggle('danger', lowStockBooks.length > 0);
-                elements.dashboardLowStockBooks.innerHTML = lowStockBooks.length > 0 ? lowStockBooks.map(book => `
-                    <tr class="${book.stock < 5 ? 'low-stock' : ''}">
-                        <td>${html(book.name)}</td>
-                        <td>${html(book.product_type === 'book' ? book.author : ucfirst(book.product_type))}</td>
-                        <td>${html(book.stock)}</td>
-                        <td class="actions">
-                            <button class="btn btn-info btn-sm" onclick="openRestockModal(${html(book.id)}, '${html(book.name)}', ${html(book.stock)})"><i class="fas fa-box"></i> Restock</button>
-                        </td>
-                    </tr>
-                `).join('') : `<tr><td colspan="4">No products currently low in stock.</td></tr>`;
-            }
-            const todaySalesData = await fetchJSON('index.php?action=get_report_data_json&report_type=sales-daily&date=' + new Date().toISOString().slice(0, 10));
-            if (todaySalesData.success && todaySalesData.report_data.raw_data && todaySalesData.report_data.raw_data[1]) {
-                elements.todaySalesTotal.textContent = todaySalesData.report_data.raw_data[1].Value;
-            }
-            const recentSalesData = await fetchJSON('index.php?action=get_sales_json&page_num=1&limit=5');
-            if (recentSalesData.success) {
-                elements.dashboardRecentSales.innerHTML = recentSalesData.sales.length > 0 ? recentSalesData.sales.map(sale => `
-                    <tr>
-                        <td>${formatDate(html(sale.sale_date))}</td>
-                        <td>${html(sale.customer_name || 'Guest')}</td>
-                        <td>${html(sale.item_names)}</td>
-                        <td>${formatCurrency(html(sale.total))}</td>
-                    </tr>
-                `).join('') : `<tr><td colspan="4">No recent sales.</td></tr>`;
-            }
-        }
+        async function updateDashboard() {}
         async function renderBooks() {
             if (!elements.booksList) return;
             const search = elements.bookSearch.value;
@@ -6910,21 +5447,18 @@ if ($settings_result) {
                 updatePaginationControls(pagination.books, data.total_items);
                 elements.booksList.innerHTML = books.length > 0 ? books.map(book => `
                     <tr class="${book.stock < 5 ? 'low-stock' : ''}">
-                        <td>${book.cover_image ? `<img src="${html(book.cover_image)}" alt="Cover" width="50" height="70" style="object-fit: cover; border-radius: 3px;">` : '<i class="fas fa-box-open fa-2x" style="color: var(--light-text-color);"></i>'}</td>
-                        <td>${html(book.name)}</td>
-                        <td>${html(ucfirst(book.product_type))}</td>
-                        <td>${html(book.author || 'N/A')}</td>
+                        <td>${book.cover_image ? `<img src="${html(book.cover_image)}" alt="Cover" width="50" height="70" style="object-fit: cover; border-radius: 3px;">` : '<i class="fas fa-book-open fa-2x" style="color: var(--light-text-color);"></i>'}</td>
+                        <td>${html(book.title)}</td>
+                        <td>${html(book.author)}</td>
                         <td>${html(book.category)}</td>
+                        <td>${html(book.isbn)}</td>
                         <td>${formatCurrency(book.price)}</td>
                         <td>${html(book.stock)}</td>
                         <td class="actions">
-                            <button class="btn btn-info btn-sm" onclick="openRestockModal(${html(book.id)}, '${html(book.name)}', ${html(book.stock)})"><i class="fas fa-box"></i> Restock</button>
-                            <?php if (isAdmin() || isStaff()) : ?>
-                                <button class="btn btn-sm btn-success" onclick="quickSell(${html(book.id)})"><i class="fas fa-bolt"></i> Quick Sell</button>
-                            <?php endif; ?>
+                            <button class="btn btn-info btn-sm" onclick="openRestockModal(${html(book.id)}, '${html(book.title)}', ${html(book.stock)})"><i class="fas fa-box"></i> Restock</button>
                             <?php if (isAdmin()) : ?>
                                 <button class="btn btn-primary btn-sm" onclick="openBookModal(${html(book.id)})"><i class="fas fa-edit"></i> Edit</button>
-                                <form action="index.php?page=books" method="POST" style="display:inline;" onsubmit="return confirm('Are you sure you want to delete this product?');">
+                                <form action="index.php?page=books" method="POST" style="display:inline;" onsubmit="return confirm('Are you sure you want to deletebook?');">
                                     <input type="hidden" name="action" value="delete_book">
                                     <input type="hidden" name="book_id" value="${html(book.id)}">
                                     <button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-trash"></i> Delete</button>
@@ -6932,33 +5466,30 @@ if ($settings_result) {
                             <?php endif; ?>
                         </td>
                     </tr>
-                `).join('') : `<tr><td colspan="8">No products found.</td></tr>`;
+                `).join('') : `<tr><td colspan="8">No books found.</td></tr>`;
             }
         }
         async function openBookModal(bookId = null) {
-            if (!<?php echo isAdmin() || isStaff() ? 'true' : 'false'; ?>) {
-                showToast('Unauthorized to manage products.', 'error');
+            if (!<?php echo isAdmin() ? 'true' : 'false'; ?> && bookId) {
+                showToast('Unauthorized to edit book details.', 'error');
                 return;
             }
             elements.bookForm.reset();
             elements.bookId.value = '';
-            elements.bookModalTitle.textContent = 'Add New Product';
+            elements.bookModalTitle.textContent = 'Add New Book';
             elements.bookCoverPreview.style.display = 'none';
             elements.bookCoverPreview.src = '';
             elements.bookCoverImage.value = '';
             elements.existingCoverImage.value = '';
             elements.removeCoverLabel.style.display = 'none';
             elements.removeCoverImage.checked = false;
-            elements.bookAuthorGroup.style.display = 'block';
-            elements.bookDetailsGroup.style.display = 'flex';
             if (bookId) {
                 const data = await fetchJSON(`index.php?action=get_books_json&book_id=${bookId}`);
                 if (data.success && data.books.length > 0) {
                     const book = data.books[0];
-                    elements.bookModalTitle.textContent = 'Edit Product';
+                    elements.bookModalTitle.textContent = 'Edit Book';
                     elements.bookId.value = book.id;
-                    elements.bookName.value = book.name;
-                    elements.productType.value = book.product_type;
+                    elements.bookTitle.value = book.title;
                     elements.bookAuthor.value = book.author;
                     elements.bookCategory.value = book.category;
                     elements.bookIsbn.value = book.isbn;
@@ -6973,53 +5504,16 @@ if ($settings_result) {
                         elements.existingCoverImage.value = book.cover_image;
                         elements.removeCoverLabel.style.display = 'block';
                     }
-                    toggleBookFields(book.product_type);
                 } else {
-                    showToast('Product not found.', 'error');
+                    showToast('Book not found.', 'error');
                     return;
                 }
-            } else {
-                toggleBookFields('book');
             }
             showModal(elements.bookModal);
         }
-
-        function toggleBookFields(productType) {
-            if (productType === 'book') {
-                elements.bookAuthorGroup.style.display = 'block';
-                elements.bookDetailsGroup.style.display = 'flex';
-                elements.bookIsbnGroup.style.display = 'block';
-                elements.bookPublisherGroup.style.display = 'block';
-                elements.bookYearGroup.style.display = 'block';
-                elements.bookAuthor.required = true;
-                elements.bookIsbn.required = true;
-            } else {
-                elements.bookAuthorGroup.style.display = 'none';
-                elements.bookDetailsGroup.style.display = 'none';
-                elements.bookIsbnGroup.style.display = 'none';
-                elements.bookPublisherGroup.style.display = 'none';
-                elements.bookYearGroup.style.display = 'none';
-                elements.bookAuthor.required = false;
-                elements.bookIsbn.required = false;
-            }
-        }
-        async function quickSell(bookId) {
-            if (!confirm('Are you sure you want to perform a quick cash sale for 1 unit of this product?')) {
-                return;
-            }
-            const formData = new FormData();
-            formData.append('action', 'quick_sell');
-            formData.append('book_id', bookId);
-            const response = await fetch('index.php?page=books', {
-                method: 'POST',
-                body: formData
-            });
-            const textResponse = await response.text();
-            window.location.reload();
-        }
-        async function openRestockModal(bookId, name, stock) {
+        async function openRestockModal(bookId, title, stock) {
             elements.restockBookId.value = bookId;
-            elements.restockBookName.value = name;
+            elements.restockBookTitle.value = title;
             elements.restockCurrentStock.value = stock;
             elements.restockQuantity.value = 1;
             showModal(elements.restockModal);
@@ -7042,15 +5536,13 @@ if ($settings_result) {
                         <td>${customer.is_active ? 'Active' : 'Inactive'}</td>
                         <td class="actions">
                             <button class="btn btn-info btn-sm" onclick="viewCustomerHistory(${html(customer.id)}, '${html(customer.name)}')"><i class="fas fa-history"></i> History</button>
-                            <?php if (isAdmin()) : ?>
-                                <button class="btn btn-primary btn-sm" onclick="openCustomerModal(${html(customer.id)})"><i class="fas fa-edit"></i> Edit</button>
-                                <form action="index.php?page=customers" method="POST" style="display:inline;">
-                                    <input type="hidden" name="action" value="toggle_customer_status">
-                                    <input type="hidden" name="customer_id" value="${html(customer.id)}">
-                                    <input type="hidden" name="current_status" value="${customer.is_active ? 'true' : 'false'}">
-                                    <button type="submit" class="btn ${customer.is_active ? 'btn-danger' : 'btn-success'} btn-sm"><i class="fas ${customer.is_active ? 'fa-user-slash' : 'fa-user-check'}"></i> ${customer.is_active ? 'Deactivate' : 'Activate'}</button>
-                                </form>
-                            <?php endif; ?>
+                            <button class="btn btn-primary btn-sm" onclick="openCustomerModal(${html(customer.id)})"><i class="fas fa-edit"></i> Edit</button>
+                            <form action="index.php?page=customers" method="POST" style="display:inline;">
+                                <input type="hidden" name="action" value="toggle_customer_status">
+                                <input type="hidden" name="customer_id" value="${html(customer.id)}">
+                                <input type="hidden" name="current_status" value="${customer.is_active ? 'true' : 'false'}">
+                                <button type="submit" class="btn ${customer.is_active ? 'btn-danger' : 'btn-success'} btn-sm"><i class="fas ${customer.is_active ? 'fa-user-slash' : 'fa-user-check'}"></i> ${customer.is_active ? 'Deactivate' : 'Activate'}</button>
+                            </form>
                         </td>
                     </tr>
                 `).join('') : `<tr><td colspan="6">No customers found.</td></tr>`;
@@ -7058,14 +5550,9 @@ if ($settings_result) {
         }
         async function openCustomerModal(customerId = null) {
             if (!elements.customerForm) return;
-            if (!<?php echo isAdmin() ? 'true' : 'false'; ?>) {
-                showToast('Unauthorized to manage customers.', 'error');
-                return;
-            }
             elements.customerForm.reset();
             elements.customerId.value = '';
             elements.customerModalTitle.textContent = 'Add New Customer';
-            elements.customerPasswordGroup.style.display = 'block';
             if (customerId) {
                 const data = await fetchJSON(`index.php?action=get_customers_json&customer_id=${customerId}`);
                 if (data.success && data.customers.length > 0) {
@@ -7076,14 +5563,10 @@ if ($settings_result) {
                     elements.customerPhone.value = customer.phone;
                     elements.customerEmail.value = customer.email;
                     elements.customerAddress.value = customer.address;
-                    elements.customerPasswordGroup.style.display = 'block';
-                    elements.customerPassword.placeholder = 'Leave empty to keep current password';
                 } else {
                     showToast('Customer not found.', 'error');
                     return;
                 }
-            } else {
-                elements.customerPassword.placeholder = '';
             }
             showModal(elements.customerModal);
         }
@@ -7097,7 +5580,7 @@ if ($settings_result) {
                     <tr>
                         <td>${html(sale.id)}</td>
                         <td>${formatDate(html(sale.sale_date))}</td>
-                        <td>${html(sale.item_names)}</td>
+                        <td>${html(sale.item_titles)}</td>
                         <td>${formatCurrency(html(sale.total))}</td>
                     </tr>
                 `).join('') : `<tr><td colspan="4">No purchases found for this customer.</td></tr>`;
@@ -7179,7 +5662,7 @@ if ($settings_result) {
                         <td class="actions">
                             <button class="btn btn-info btn-sm" onclick="openPurchaseOrderModal(${html(po.id)})"><i class="fas fa-eye"></i> View/Edit</button>
                             ${(po.status !== 'received' && po.status !== 'cancelled' && <?php echo isAdmin() ? 'true' : 'false'; ?>) ? `
-                                <form action="index.php?page=purchase-orders" method="POST" style="display:inline;" onsubmit="return confirm('Are you sure you want to mark this Purchase Order as Received and update product stock?');">
+                                <form action="index.php?page=purchase-orders" method="POST" style="display:inline;" onsubmit="return confirm('Are you sure you want to mark this Purchase Order as Received and update book stock?');">
                                     <input type="hidden" name="action" value="receive_po">
                                     <input type="hidden" name="po_id" value="${html(po.id)}">
                                     <button type="submit" class="btn btn-success btn-sm"><i class="fas fa-truck-loading"></i> Receive</button>
@@ -7209,9 +5692,12 @@ if ($settings_result) {
             elements.poOrderDate.value = new Date().toISOString().split('T')[0];
             elements.poExpectedDate.value = '';
             elements.poStatus.value = 'pending';
+
+            // **FIX:** Reset the new dropdown menu instead of the old search box.
             if (elements.poBookSelect) {
                 elements.poBookSelect.selectedIndex = 0;
             }
+
             currentPoItems = [];
             renderPoItems();
             elements.receivePoBtn.style.display = 'none';
@@ -7230,7 +5716,7 @@ if ($settings_result) {
                     if (po.status === 'ordered') {
                         elements.receivePoBtn.style.display = 'inline-flex';
                         elements.receivePoBtn.onclick = () => {
-                            if (confirm('Are you sure you want to mark this Purchase Order as Received and update product stock?')) {
+                            if (confirm('Are you sure you want to mark this Purchase Order as Received and update book stock?')) {
                                 const form = document.createElement('form');
                                 form.action = `index.php?page=purchase-orders`;
                                 form.method = 'POST';
@@ -7258,21 +5744,40 @@ if ($settings_result) {
             }
             showModal(elements.purchaseOrderModal);
         }
+        async function searchBooksForPo(query) {
+            if (!elements.poBookSearchResults) return;
+            elements.poBookSearchResults.innerHTML = '';
+            if (query.length < 2) {
+                return;
+            }
+            const data = await fetchJSON(`index.php?action=get_books_json&search=${encodeURIComponent(query)}&limit=5`);
+            if (data.success) {
+                const filteredBooks = data.books;
+                filteredBooks.forEach(book => {
+                    const div = document.createElement('div');
+                    div.textContent = `${html(book.title)} by ${html(book.author)} (ISBN: ${html(book.isbn)})`;
+                    div.onclick = () => addPoItem(book);
+                    elements.poBookSearchResults.appendChild(div);
+                });
+            }
+        }
 
-        function addPoItem(product) {
-            const existingItem = currentPoItems.find(item => item.bookId === product.id);
+        function addPoItem(book) {
+            const existingItem = currentPoItems.find(item => item.bookId === book.id);
             if (existingItem) {
                 existingItem.quantity++;
             } else {
                 currentPoItems.push({
-                    bookId: product.id,
-                    name: product.name,
+                    bookId: book.id,
+                    title: book.title,
                     quantity: 1,
-                    cost_per_unit: parseFloat((product.price * 0.7).toFixed(2)),
+                    cost_per_unit: parseFloat((book.price * 0.7).toFixed(2)),
                 });
             }
+            // **FIX:** The lines that tried to clear the old search box have been removed.
             renderPoItems();
         }
+
 
         function updatePoItemQuantity(bookId, quantity) {
             const itemIndex = currentPoItems.findIndex(item => item.bookId === bookId);
@@ -7285,7 +5790,7 @@ if ($settings_result) {
         function updatePoItemCost(bookId, cost) {
             const itemIndex = currentPoItems.findIndex(item => item.bookId === bookId);
             if (itemIndex > -1) {
-                currentPoItems[itemIndex].cost_per_unit = Math.max(0, cost);
+                currentPoItems[itemIndex].cost_per_unit = Math.max(0, cost); // FIX: Was unitCost
                 renderPoItems();
             }
         }
@@ -7301,12 +5806,13 @@ if ($settings_result) {
                 elements.poItemsList.innerHTML = `<tr><td colspan="5">No items added to this purchase order.</td></tr>`;
             } else {
                 elements.poItemsList.innerHTML = currentPoItems.map(item => {
+                    // **FIX:** Ensure cost_per_unit is a number before using it for calculations.
                     const costPerUnitNumber = parseFloat(item.cost_per_unit);
                     const subtotal = item.quantity * costPerUnitNumber;
                     totalCost += subtotal;
                     return `
                         <tr>
-                            <td>${html(item.name)}</td>
+                            <td>${html(item.title)}</td>
                             <td><input type="number" min="1" value="${html(item.quantity)}" onchange="updatePoItemQuantity(${html(item.bookId)}, parseInt(this.value))" style="width: 70px;"></td>
                             <td><input type="number" min="0" step="0.01" value="${html(costPerUnitNumber.toFixed(2))}" onchange="updatePoItemCost(${html(item.bookId)}, parseFloat(this.value))" style="width: 100px;"></td>
                             <td>${formatCurrency(subtotal)}</td>
@@ -7318,77 +5824,42 @@ if ($settings_result) {
             elements.poGrandTotal.textContent = formatCurrency(totalCost);
             elements.poItemsInput.value = JSON.stringify(currentPoItems);
         }
-        async function renderBooksForCart(isOnlineCart = false) {
-            const listElement = isOnlineCart ? elements.publicBooksList : elements.booksForCartList;
-            const paginationConfig = isOnlineCart ? pagination.publicBooks : pagination.booksForCart;
-            const searchElement = isOnlineCart ? elements.publicBookSearch : elements.bookToCartSearch;
-            const categoryElement = isOnlineCart ? elements.publicBookCategoryFilter : null;
-            const productTypeElement = isOnlineCart ? elements.publicProductTypeFilter : null;
-            const sortElement = isOnlineCart ? elements.publicBookSort : null;
-            if (!listElement) return;
-            const search = searchElement ? searchElement.value : '';
-            const category = categoryElement ? categoryElement.value : 'all';
-            const product_type = productTypeElement ? productTypeElement.value : 'all';
-            const sort = sortElement ? sortElement.value : 'name-asc';
-            const page = paginationConfig.currentPage;
-            let apiUrl = `index.php?action=get_books_for_cart_json&search=${encodeURIComponent(search)}&page_num=${page}`;
-            if (isOnlineCart) {
-                apiUrl = `index.php?action=get_public_books_json&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}&product_type=${encodeURIComponent(product_type)}&sort=${sort}&page_num=${page}`;
-            }
-            const data = await fetchJSON(apiUrl);
+        async function renderBooksForCart() {
+            if (!elements.booksForCartList) return;
+            const search = elements.bookToCartSearch.value;
+            const page = pagination.booksForCart.currentPage;
+            const data = await fetchJSON(`index.php?action=get_books_for_cart_json&search=${encodeURIComponent(search)}&page_num=${page}`);
             if (data.success) {
-                const products = data.books;
-                updatePaginationControls(paginationConfig, data.total_items);
-                if (isOnlineCart) {
-                    listElement.innerHTML = products.length > 0 ? products.map(product => `
-                        <div class="book-card">
-                            <img src="${product.cover_image ? html(product.cover_image) : 'https://via.placeholder.com/150x200?text=No+Cover'}" alt="${html(product.name)}">
-                            <h3>${html(product.name)}</h3>
-                            <p>${product.author ? 'by ' + html(product.author) : html(ucfirst(product.product_type))}</p>
-                            <div class="price">${formatCurrency(product.price)}</div>
-                            <div class="stock-info ${product.stock <= 5 && product.stock > 0 ? 'low' : ''} ${product.stock === 0 ? 'out' : ''}">
-                                ${product.stock > 0 ? html(product.stock) + ' In Stock' : 'Out of Stock'}
-                            </div>
-                            <div class="public-product-actions">
-                                <a href="https://wa.me/<?php echo html($public_settings['whatsapp_number'] ?? ''); ?>?text=Hello,%20I%20would%20like%20to%20order%20${encodeURIComponent(html(product.name))}%20-%20Price:%20${encodeURIComponent(formatCurrency(html(product.price)))}." target="_blank" class="whatsapp-btn"><i class="fab fa-whatsapp"></i> WhatsApp</a>
-                                ${<?php echo isCustomer() ? 'true' : 'false'; ?> ? `
-                                    <button class="btn btn-primary" onclick="addToCart(${html(product.id)}, '${html(product.name)}', ${html(product.price)}, true)" ${product.stock <= 0 ? 'disabled' : ''}><i class="fas fa-cart-plus"></i> Add to Cart</button>
-                                ` : `
-                                    <a href="index.php?page=customer-login" class="btn btn-primary"><i class="fas fa-user-circle"></i> Login to Order</a>
-                                `}
-                            </div>
-                        </div>
-                    `).join('') : `<p>No products found matching your criteria.</p>`;
-                } else {
-                    listElement.innerHTML = products.length > 0 ? products.map(product => {
-                        const inCartQuantity = currentCart.find(item => item.bookId === product.id)?.quantity || 0;
-                        const availableStock = product.stock - inCartQuantity;
-                        return `
-                            <tr>
-                                <td>${html(product.name)}</td>
-                                <td>${html(product.author || ucfirst(product.product_type))}</td>
-                                <td>${formatCurrency(product.price)}</td>
-                                <td class="${availableStock < 5 && availableStock > 0 ? 'low-stock' : (availableStock <= 0 ? 'danger' : '')}">${html(availableStock)}</td>
-                                <td>
-                                    <button class="btn btn-primary btn-sm" onclick="addToCart(${html(product.id)}, '${html(product.name)}', ${html(product.price)})" ${availableStock <= 0 ? 'disabled' : ''}><i class="fas fa-cart-plus"></i> Add to Cart</button>
-                                </td>
-                            </tr>
-                        `;
-                    }).join('') : `<tr><td colspan="5">No products found to add to cart.</td></tr>`;
-                }
+                const books = data.books;
+                updatePaginationControls(pagination.booksForCart, data.total_items);
+                elements.booksForCartList.innerHTML = books.length > 0 ? books.map(book => {
+                    const inCartQuantity = currentCart.find(item => item.bookId === book.id)?.quantity || 0;
+                    const availableStock = book.stock - inCartQuantity;
+                    return `
+                        <tr>
+                            <td>${html(book.title)}</td>
+                            <td>${html(book.author)}</td>
+                            <td>${formatCurrency(book.price)}</td>
+                            <td class="${availableStock < 5 && availableStock > 0 ? 'low-stock' : (availableStock <= 0 ? 'danger' : '')}">${html(availableStock)}</td>
+                            <td>
+                                <button class="btn btn-primary btn-sm" onclick="addToCart(${html(book.id)}, '${html(book.title)}', ${html(book.price)})" ${availableStock <= 0 ? 'disabled' : ''}><i class="fas fa-cart-plus"></i> Add to Cart</button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('') : `<tr><td colspan="5">No books found to add to cart.</td></tr>`;
             }
         }
-        async function addToCart(bookId, name, price, isOnlineCart = false) {
+        async function addToCart(bookId, title, price) {
             const data = await fetchJSON(`index.php?action=get_books_json&book_id=${bookId}`);
             if (!data.success || data.books.length === 0) {
-                showToast('Product not found in inventory.', 'error');
+                showToast('Book not found in inventory.', 'error');
                 return;
             }
-            const product = data.books[0];
+            const book = data.books[0];
             const existingItemIndex = currentCart.findIndex(item => item.bookId === bookId);
             const currentQuantityInCart = existingItemIndex > -1 ? currentCart[existingItemIndex].quantity : 0;
-            if (currentQuantityInCart >= product.stock) {
-                showToast(`Cannot add more "${html(name)}". Only ${html(product.stock)} available.`, 'warning');
+            if (currentQuantityInCart >= book.stock) {
+                showToast(`Cannot add more "${html(title)}". Only ${html(book.stock)} available.`, 'warning');
                 return;
             }
             if (existingItemIndex > -1) {
@@ -7396,73 +5867,60 @@ if ($settings_result) {
             } else {
                 currentCart.push({
                     bookId: bookId,
-                    name: name,
+                    title: title,
                     price: price,
                     quantity: 1,
                     discount_per_unit: 0,
-                    category: product.category,
-                    product_type: product.product_type
+                    category: book.category
                 });
             }
-            showToast(`"${html(name)}" added to cart.`, 'info');
-            renderCart(isOnlineCart);
-            if (!isOnlineCart) {
-                renderBooksForCart(false);
-            } else {
-                renderBooksForCart(true);
-            }
+            showToast(`"${html(title)}" added to cart.`, 'info');
+            renderCart();
+            renderBooksForCart();
         }
-        async function updateCartItemQuantity(bookId, newQuantity, isOnlineCart = false) {
+        async function updateCartItemQuantity(bookId, newQuantity) {
             const data = await fetchJSON(`index.php?action=get_books_json&book_id=${bookId}`);
             if (!data.success || data.books.length === 0) {
-                showToast('Product not found in inventory.', 'error');
+                showToast('Book not found in inventory.', 'error');
                 return;
             }
-            const product = data.books[0];
+            const book = data.books[0];
             const itemIndex = currentCart.findIndex(item => item.bookId === bookId);
             if (itemIndex > -1) {
                 if (newQuantity <= 0) {
-                    removeCartItem(bookId, isOnlineCart);
+                    removeCartItem(bookId);
                     return;
                 }
-                if (newQuantity > product.stock) {
-                    showToast(`Cannot add more than available stock (${html(product.stock)}) for "${html(product.name)}".`, 'warning');
-                    currentCart[itemIndex].quantity = product.stock;
+                if (newQuantity > book.stock) {
+                    showToast(`Cannot add more than available stock (${html(book.stock)}) for "${html(book.title)}".`, 'warning');
+                    currentCart[itemIndex].quantity = book.stock;
                 } else {
                     currentCart[itemIndex].quantity = newQuantity;
                 }
-                renderCart(isOnlineCart);
-                if (!isOnlineCart) {
-                    renderBooksForCart(false);
-                } else {
-                    renderBooksForCart(true);
-                }
+                renderCart();
+                renderBooksForCart();
             }
         }
 
-        function removeCartItem(bookId, isOnlineCart = false) {
+        function removeCartItem(bookId) {
             currentCart = currentCart.filter(item => item.bookId !== bookId);
             showToast('Item removed from cart.', 'info');
-            renderCart(isOnlineCart);
-            if (!isOnlineCart) {
-                renderBooksForCart(false);
-            } else {
-                renderBooksForCart(true);
-            }
+            renderCart();
+            renderBooksForCart();
         }
-        async function calculateCartTotals(forOnlineCart = false) {
+        async function calculateCartTotals() {
             let subtotal = 0;
             let totalDiscount = 0;
             for (const item of currentCart) {
                 const data = await fetchJSON(`index.php?action=get_books_json&book_id=${item.bookId}`);
                 if (data.success && data.books.length > 0) {
-                    const product = data.books[0];
-                    item.price = product.price;
-                    item.category = product.category;
+                    const book = data.books[0];
+                    item.price = book.price;
+                    item.category = book.category;
                     subtotal += item.price * item.quantity;
                     item.discount_per_unit = 0;
                 } else {
-                    console.error(`Product ID ${item.bookId} not found for cart calculation.`);
+                    console.error(`Book ID ${item.bookId} not found for cart calculation.`);
                 }
             }
             if (appliedPromotion) {
@@ -7499,10 +5957,52 @@ if ($settings_result) {
                 total: finalTotal
             };
         }
-        async function renderCart(isOnlineCart = false) {
+        async function renderCart() {
+            if (!elements.cartItemsTable) return;
+            const {
+                subtotal,
+                discount,
+                total
+            } = await calculateCartTotals();
+            elements.cartTotalItems.textContent = currentCart.reduce((sum, item) => sum + item.quantity, 0);
+            if (currentCart.length === 0) {
+                elements.cartItemsTable.innerHTML = `<tr><td colspan="6">Cart is empty.</td></tr>`;
+                elements.clearCartBtn.disabled = true;
+                elements.checkoutBtn.disabled = true;
+                if (elements.checkoutPromotionCode) elements.checkoutPromotionCode.value = '';
+                appliedPromotion = null;
+            } else {
+                elements.cartItemsTable.innerHTML = currentCart.map(item => {
+                    const itemSubtotal = item.price * item.quantity;
+                    const itemDiscount = item.discount_per_unit * item.quantity;
+                    const itemNetTotal = itemSubtotal - itemDiscount;
+                    return `
+                        <tr>
+                            <td>${html(item.title)}</td>
+                            <td>${formatCurrency(item.price)}</td>
+                            <td class="quantity-controls">
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="updateCartItemQuantity(${html(item.bookId)}, ${item.quantity - 1})">-</button>
+                                <input type="number" value="${html(item.quantity)}" min="1" onchange="updateCartItemQuantity(${html(item.bookId)}, parseInt(this.value))">
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="updateCartItemQuantity(${html(item.bookId)}, ${item.quantity + 1})">+</button>
+                            </td>
+                            <td>${itemDiscount > 0 ? formatCurrency(itemDiscount) : 'N/A'}</td>
+                            <td>${formatCurrency(itemNetTotal)}</td>
+                            <td class="actions">
+                                <button type="button" class="btn btn-danger btn-sm" onclick="removeCartItem(${html(item.bookId)})"><i class="fas fa-trash"></i> Remove</button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+                elements.clearCartBtn.disabled = false;
+                elements.checkoutBtn.disabled = false;
+            }
+            elements.cartGrandTotal.textContent = formatCurrency(total);
+            if (elements.checkoutSubtotal) elements.checkoutSubtotal.value = formatCurrency(subtotal);
+            if (elements.checkoutDiscount) elements.checkoutDiscount.value = formatCurrency(discount);
+            if (elements.checkoutTotal) elements.checkoutTotal.value = formatCurrency(total);
+            if (elements.checkoutDiscountDisplay) elements.checkoutDiscountDisplay.style.display = discount > 0 ? 'block' : 'none';
             fetch('index.php?action=update_session_cart', {
                 method: 'POST',
-                keepalive: true,
                 headers: {
                     'Content-Type': 'application/json'
                 },
@@ -7510,65 +6010,13 @@ if ($settings_result) {
                     cart: currentCart,
                     promotion: appliedPromotion
                 })
-            }).catch(console.error);
-            const tableElement = isOnlineCart ? elements.onlineCartItemsTable : elements.cartItemsTable;
-            const totalItemsSpan = isOnlineCart ? elements.onlineCartTotalItems : elements.cartTotalItems;
-            const grandTotalSpan = isOnlineCart ? elements.onlineCartGrandTotal : elements.cartGrandTotal;
-            const clearBtn = isOnlineCart ? elements.onlineClearCartBtn : elements.clearCartBtn;
-            const checkoutBtn = isOnlineCart ? elements.placeOnlineOrderBtn : elements.checkoutBtn;
-            const {
-                subtotal,
-                discount,
-                total
-            } = await calculateCartTotals(isOnlineCart);
-            totalItemsSpan.textContent = currentCart.reduce((sum, item) => sum + item.quantity, 0);
-            if (currentCart.length === 0) {
-                tableElement.innerHTML = `<tr><td colspan="6">Cart is empty.</td></tr>`;
-                clearBtn.disabled = true;
-                checkoutBtn.disabled = true;
-                if (elements.checkoutPromotionCode && !isOnlineCart) elements.checkoutPromotionCode.value = '';
-                if (elements.onlineCheckoutPromotionCode && isOnlineCart) elements.onlineCheckoutPromotionCode.value = '';
-                appliedPromotion = null;
-            } else {
-                tableElement.innerHTML = currentCart.map(item => {
-                    const itemSubtotal = item.price * item.quantity;
-                    const itemDiscount = item.discount_per_unit * item.quantity;
-                    const itemNetTotal = itemSubtotal - itemDiscount;
-                    return `
-                        <tr>
-                            <td>${html(item.name)}</td>
-                            <td>${formatCurrency(item.price)}</td>
-                            <td class="quantity-controls">
-                                <button type="button" class="btn btn-secondary btn-sm" onclick="updateCartItemQuantity(${html(item.bookId)}, ${item.quantity - 1}, ${isOnlineCart})">-</button>
-                                <input type="number" value="${html(item.quantity)}" min="1" onchange="updateCartItemQuantity(${html(item.bookId)}, parseInt(this.value), ${isOnlineCart})">
-                                <button type="button" class="btn btn-secondary btn-sm" onclick="updateCartItemQuantity(${html(item.bookId)}, ${item.quantity + 1}, ${isOnlineCart})">+</button>
-                            </td>
-                            <td>${itemDiscount > 0 ? formatCurrency(itemDiscount) : 'N/A'}</td>
-                            <td>${formatCurrency(itemNetTotal)}</td>
-                            <td class="actions">
-                                <button type="button" class="btn btn-danger btn-sm" onclick="removeCartItem(${html(item.bookId)}, ${isOnlineCart})"><i class="fas fa-trash"></i> Remove</button>
-                            </td>
-                        </tr>
-                    `;
-                }).join('');
-                clearBtn.disabled = false;
-                checkoutBtn.disabled = false;
-            }
-            grandTotalSpan.textContent = formatCurrency(total);
-            if (!isOnlineCart && elements.checkoutSubtotal) {
-                elements.checkoutSubtotal.value = formatCurrency(subtotal);
-                elements.checkoutDiscount.value = formatCurrency(discount);
-                elements.checkoutTotal.value = formatCurrency(total);
-                elements.checkoutDiscountDisplay.style.display = discount > 0 ? 'block' : 'none';
-                elements.checkoutPromotionCodeInput.value = appliedPromotion ? appliedPromotion.code : '';
-            }
-            if (isOnlineCart && elements.onlineOrderSubtotal) {
-                elements.onlineOrderSubtotal.value = formatCurrency(subtotal);
-                elements.onlineOrderDiscount.value = formatCurrency(discount);
-                elements.onlineOrderTotal.value = formatCurrency(total);
-                elements.onlineOrderDiscountDisplay.style.display = discount > 0 ? 'block' : 'none';
-                elements.onlineOrderPromotionCodeInput.value = appliedPromotion ? appliedPromotion.code : '';
-            }
+            }).then(response => response.json()).then(data => {
+                if (!data.success) {
+                    console.error('Failed to update session cart:', data.message);
+                }
+            }).catch(error => {
+                console.error('Error updating session cart:', error);
+            });
         }
         async function openCheckoutModal() {
             if (!elements.checkoutModal) return;
@@ -7579,25 +6027,12 @@ if ($settings_result) {
             await renderCart();
             showModal(elements.checkoutModal);
         }
-        async function openOnlineOrderModal() {
-            if (!elements.onlineOrderModal) return;
-            if (currentCart.length === 0) {
-                showToast('Your cart is empty. Please add items before placing an order.', 'warning');
-                return;
-            }
-            await renderCart(true);
-            elements.onlineOrderCartItemsInput.value = JSON.stringify(currentCart);
-            showModal(elements.onlineOrderModal);
-        }
-        async function applyPromotion(isOnlineCart = false) {
-            const promoCodeInput = isOnlineCart ? elements.onlineCheckoutPromotionCode : elements.checkoutPromotionCode;
-            const promoMessageDiv = isOnlineCart ? elements.onlinePromoMessage : document.getElementById('promo-message');
-            if (!promoCodeInput) return;
-            const promoCode = promoCodeInput.value.trim();
+        async function applyPromotion() {
+            if (!elements.checkoutPromotionCode) return;
+            const promoCode = elements.checkoutPromotionCode.value.trim();
             if (!promoCode) {
                 appliedPromotion = null;
-                promoMessageDiv.textContent = '';
-                renderCart(isOnlineCart);
+                renderCart();
                 showToast('Promotion code cleared.', 'info');
                 return;
             }
@@ -7615,32 +6050,21 @@ if ($settings_result) {
             );
             if (promotion) {
                 appliedPromotion = promotion;
-                promoMessageDiv.textContent = `Applied: ${html(promotion.code)} - ${promotion.type === 'percentage' ? promotion.value + '%' : formatCurrency(promotion.value)} off ${html(promotion.applies_to_value_name)}`;
-                promoMessageDiv.style.color = 'var(--success-color)';
                 showToast(`Promotion "${html(promotion.code)}" applied!`, 'success');
             } else {
                 appliedPromotion = null;
-                promoMessageDiv.textContent = 'Invalid or expired promotion code.';
-                promoMessageDiv.style.color = 'var(--danger-color)';
                 showToast('Invalid or expired promotion code.', 'error');
             }
-            renderCart(isOnlineCart);
+            renderCart();
         }
 
-        function clearCart(isOnlineCart = false) {
+        function clearCart() {
             if (confirm('Are you sure you want to clear the entire cart?')) {
                 currentCart = [];
                 appliedPromotion = null;
-                if (elements.checkoutPromotionCode && !isOnlineCart) elements.checkoutPromotionCode.value = '';
-                if (elements.onlineCheckoutPromotionCode && isOnlineCart) elements.onlineCheckoutPromotionCode.value = '';
-                if (document.getElementById('promo-message') && !isOnlineCart) document.getElementById('promo-message').textContent = '';
-                if (elements.onlinePromoMessage && isOnlineCart) elements.onlinePromoMessage.textContent = '';
-                renderCart(isOnlineCart);
-                if (!isOnlineCart) {
-                    renderBooksForCart(false);
-                } else {
-                    renderBooksForCart(true);
-                }
+                if (elements.checkoutPromotionCode) elements.checkoutPromotionCode.value = '';
+                renderCart();
+                renderBooksForCart();
                 showToast('Cart cleared.', 'info');
             }
         }
@@ -7657,7 +6081,7 @@ if ($settings_result) {
                         <td>${html(sale.id)}</td>
                         <td>${formatDate(html(sale.sale_date))}</td>
                         <td>${html(sale.customer_name || 'Guest')}</td>
-                        <td>${html(sale.item_names)}</td>
+                        <td>${html(sale.item_titles)}</td>
                         <td>${formatCurrency(html(sale.total))}</td>
                         <td class="actions">
                             <button class="btn btn-info btn-sm" onclick="viewSaleDetails(${html(sale.id)})"><i class="fas fa-eye"></i> View</button>
@@ -7684,7 +6108,7 @@ if ($settings_result) {
                 }
                 elements.saleDetailsItems.innerHTML = sale.items.map(item => `
                     <tr>
-                        <td>${html(item.name)}</td>
+                        <td>${html(item.title)}</td>
                         <td>${html(item.quantity)}</td>
                         <td>${formatCurrency(html(item.price_per_unit))}</td>
                         <td>${item.discount_per_unit > 0 ? formatCurrency(item.discount_per_unit * item.quantity) : 'N/A'}</td>
@@ -7715,7 +6139,7 @@ if ($settings_result) {
             }
             elements.receiptItemsList.innerHTML = sale.items.map(item => `
                 <tr>
-                    <td style="text-align: left; padding: 2px 0;">${html(item.name)}</td>
+                    <td style="text-align: left; padding: 2px 0;">${html(item.title)}</td>
                     <td style="text-align: right; padding: 2px 0;">${html(item.quantity)}</td>
                     <td style="text-align: right; padding: 2px 0;">${formatCurrency(html(item.price_per_unit))}</td>
                     <td style="text-align: right; padding: 2px 0;">${formatCurrency((item.price_per_unit * item.quantity) - (item.discount_per_unit * item.quantity))}</td>
@@ -7785,92 +6209,6 @@ if ($settings_result) {
                 receiptContent.remove();
             });
         }
-        async function renderOnlineOrders(isCustomerView = false) {
-            const listElement = isCustomerView ? elements.customerMyOrdersList : elements.onlineOrdersList;
-            const paginationConfig = pagination.onlineOrders;
-            const search = isCustomerView ? '' : elements.onlineOrderSearch.value;
-            const status = isCustomerView ? 'all' : elements.onlineOrderStatusFilter.value;
-            const page = paginationConfig.currentPage;
-            if (!listElement) return;
-            let url = `index.php?action=get_online_orders_json&status=${status}&page_num=${page}`;
-            if (search) {
-                url += `&search=${encodeURIComponent(search)}`;
-            }
-            const data = await fetchJSON(url);
-            if (data.success) {
-                const orders = data.online_orders;
-                updatePaginationControls(paginationConfig, data.total_items);
-                listElement.innerHTML = orders.length > 0 ? orders.map(order => `
-                    <tr>
-                        <td>${html(order.id)}</td>
-                        <td>${formatDate(html(order.order_date))}</td>
-                        <td>${html(order.customer_name)}</td>
-                        <td>${order.items.map(item => `${html(item.name)} (${html(item.quantity)})`).join(', ')}</td>
-                        <td>${formatCurrency(html(order.total))}</td>
-                        <td>${html(ucfirst(order.status))}</td>
-                        <td class="actions">
-                            <button class="btn btn-info btn-sm" onclick="viewOnlineOrderDetails(${html(order.id)})"><i class="fas fa-eye"></i> View</button>
-                            ${isCustomerView ? '' : `
-                                ${order.status === 'pending' ? `
-                                    <form action="index.php?page=online-orders" method="POST" style="display:inline;" onsubmit="return confirm('Are you sure you want to approve this online order? This will create a sale and deduct stock.');">
-                                        <input type="hidden" name="action" value="approve_online_order">
-                                        <input type="hidden" name="order_id" value="${html(order.id)}">
-                                        <button type="submit" class="btn btn-success btn-sm"><i class="fas fa-check"></i> Approve</button>
-                                    </form>
-                                    <form action="index.php?page=online-orders" method="POST" style="display:inline;" onsubmit="return confirm('Are you sure you want to reject this online order?');">
-                                        <input type="hidden" name="action" value="reject_online_order">
-                                        <input type="hidden" name="order_id" value="${html(order.id)}">
-                                        <button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-times"></i> Reject</button>
-                                    </form>
-                                ` : ''}
-                            `}
-                        </td>
-                    </tr>
-                `).join('') : `<tr><td colspan="7">No online orders found.</td></tr>`;
-            }
-        }
-        async function viewOnlineOrderDetails(orderId) {
-            if (!elements.viewOnlineOrderModal) return;
-            const data = await fetchJSON(`index.php?action=get_online_orders_json&order_id=${orderId}`);
-            if (data.success && data.online_orders.length > 0) {
-                const order = data.online_orders[0];
-                elements.onlineOrderDetailsId.textContent = html(order.id);
-                elements.onlineOrderDetailsDate.textContent = formatDate(html(order.order_date));
-                elements.onlineOrderDetailsCustomer.textContent = html(order.customer_name);
-                if (elements.onlineOrderDetailsEmail) elements.onlineOrderDetailsEmail.textContent = html(order.customer_email || 'N/A');
-                if (elements.onlineOrderDetailsPhone) elements.onlineOrderDetailsPhone.textContent = html(order.customer_phone || 'N/A');
-                elements.onlineOrderDetailsStatus.textContent = html(ucfirst(order.status));
-                elements.onlineOrderDetailsSubtotal.textContent = formatCurrency(html(order.subtotal));
-                elements.onlineOrderDetailsTotal.textContent = formatCurrency(html(order.total));
-                if (order.discount > 0) {
-                    elements.onlineOrderDetailsDiscountLine.style.display = 'block';
-                    elements.onlineOrderDetailsDiscountValue.textContent = formatCurrency(html(order.discount));
-                } else {
-                    elements.onlineOrderDetailsDiscountLine.style.display = 'none';
-                }
-                elements.onlineOrderDetailsItems.innerHTML = order.items.map(item => `
-                    <tr>
-                        <td>${html(item.name)}</td>
-                        <td>${html(item.quantity)}</td>
-                        <td>${formatCurrency(html(item.price_per_unit))}</td>
-                        <td>${item.discount_per_unit > 0 ? formatCurrency(item.discount_per_unit * item.quantity) : 'N/A'}</td>
-                        <td>${formatCurrency((item.price_per_unit * item.quantity) - (item.discount_per_unit * item.quantity))}</td>
-                    </tr>
-                `).join('');
-                if (order.status === 'pending' && (<?php echo isAdmin() ? 'true' : 'false'; ?> || <?php echo isStaff() ? 'true' : 'false'; ?>)) {
-                    elements.approveOrderBtn.style.display = 'inline-flex';
-                    elements.rejectOrderBtn.style.display = 'inline-flex';
-                    elements.approveOrderId.value = order.id;
-                    elements.rejectOrderId.value = order.id;
-                } else {
-                    elements.approveOrderBtn.style.display = 'none';
-                    elements.rejectOrderBtn.style.display = 'none';
-                }
-                showModal(elements.viewOnlineOrderModal);
-            } else {
-                showToast('Online order not found.', 'error');
-            }
-        }
         async function renderPromotions() {
             if (!elements.promotionsList) return;
             const data = await fetchJSON('index.php?action=get_promotions_json');
@@ -7881,7 +6219,7 @@ if ($settings_result) {
                         <td>${html(promo.code)}</td>
                         <td>${promo.type === 'percentage' ? 'Percentage Off' : 'Fixed Amount Off'}</td>
                         <td>${promo.type === 'percentage' ? `${html(promo.value)}%` : formatCurrency(html(promo.value))}</td>
-                        <td>${html(promo.applies_to_value_name)}</td>
+                        <td>${html(promo.applies_to_value_title)}</td>
                         <td>${formatShortDate(html(promo.start_date))}</td>
                         <td>${promo.end_date ? formatShortDate(html(promo.end_date)) : 'No End Date'}</td>
                         <td class="actions">
@@ -8172,9 +6510,9 @@ if ($settings_result) {
             }
         }
         async function exportBooks() {
-            const data = await fetchJSON(`index.php?action=get_books_json&page_num=1&search=&sort=name-asc&limit=99999`);
+            const data = await fetchJSON(`index.php?action=get_books_json&page_num=1&search=&sort=title-asc&limit=99999`);
             if (data.success) {
-                downloadDataAsCsv(data.books, 'products_export.csv');
+                downloadDataAsCsv(data.books, 'books_export.csv');
             }
         }
         async function exportCustomers() {
@@ -8199,12 +6537,7 @@ if ($settings_result) {
                     order_date: po.order_date,
                     expected_date: po.expected_date,
                     status: po.status,
-                    items: JSON.stringify(po.items.map(item => ({
-                        book_id: item.book_id,
-                        name: item.name,
-                        quantity: item.quantity,
-                        cost_per_unit: item.cost_per_unit
-                    }))),
+                    items: JSON.stringify(po.items),
                     total_cost: po.total_cost
                 })), 'purchase_orders_export.csv');
             }
@@ -8217,7 +6550,7 @@ if ($settings_result) {
                     sale_date: s.sale_date,
                     customer_id: s.customer_id,
                     customer_name: s.customer_name,
-                    items: s.item_names,
+                    items: s.item_titles,
                     subtotal: s.subtotal,
                     discount: s.discount,
                     total: s.total,
@@ -8229,55 +6562,24 @@ if ($settings_result) {
             if (!elements.publicBooksList) return;
             const search = elements.publicBookSearch ? elements.publicBookSearch.value : '';
             const category = elements.publicBookCategoryFilter ? elements.publicBookCategoryFilter.value : 'all';
-            const product_type = elements.publicProductTypeFilter ? elements.publicProductTypeFilter.value : 'all';
-            const sort = elements.publicBookSort ? elements.publicBookSort.value : 'name-asc';
+            const sort = elements.publicBookSort ? elements.publicBookSort.value : 'title-asc';
             const page = pagination.publicBooks.currentPage;
-            const data = await fetchJSON(`index.php?action=get_public_books_json&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}&product_type=${encodeURIComponent(product_type)}&sort=${sort}&page_num=${page}`);
+            const data = await fetchJSON(`index.php?action=get_public_books_json&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}&sort=${sort}&page_num=${page}`);
             if (data.success) {
-                const products = data.books;
+                const books = data.books;
                 updatePaginationControls(pagination.publicBooks, data.total_items);
-                elements.publicBooksList.innerHTML = products.length > 0 ? products.map(product => `
+                elements.publicBooksList.innerHTML = books.length > 0 ? books.map(book => `
                     <div class="book-card">
-                        <img src="${product.cover_image ? html(product.cover_image) : 'https://via.placeholder.com/150x200?text=No+Cover'}" alt="${html(product.name)}">
-                        <h3>${html(product.name)}</h3>
-                        <p>${product.author ? 'by ' + html(product.author) : html(ucfirst(product.product_type))}</p>
-                        <div class="price">${formatCurrency(product.price)}</div>
-                        <div class="stock-info ${product.stock <= 5 && product.stock > 0 ? 'low' : ''} ${product.stock === 0 ? 'out' : ''}">
-                            ${product.stock > 0 ? html(product.stock) + ' In Stock' : 'Out of Stock'}
-                        </div>
-                        <div class="public-product-actions">
-                            <a href="https://wa.me/<?php echo html($public_settings['whatsapp_number'] ?? ''); ?>?text=Hello,%20I%20would%20like%20to%20order%20${encodeURIComponent(html(product.name))}%20-%20Price:%20${encodeURIComponent(formatCurrency(html(product.price)))}." target="_blank" class="whatsapp-btn"><i class="fab fa-whatsapp"></i> WhatsApp</a>
-                            ${<?php echo isCustomer() ? 'true' : 'false'; ?> ? `
-                                <button class="btn btn-primary" onclick="addToCart(${html(product.id)}, '${html(product.name)}', ${html(product.price)}, true)" ${product.stock <= 0 ? 'disabled' : ''}><i class="fas fa-cart-plus"></i> Add to Cart</button>
-                            ` : `
-                                <a href="index.php?page=customer-login" class="btn btn-primary"><i class="fas fa-user-circle"></i> Login to Order</a>
-                            `}
+                        <img src="${book.cover_image ? html(book.cover_image) : 'https://via.placeholder.com/150x200?text=No+Cover'}" alt="${html(book.title)}">
+                        <h3>${html(book.title)}</h3>
+                        <p>by ${html(book.author)}</p>
+                        <div class="price">${formatCurrency(book.price)}</div>
+                        <div class="stock-info ${book.stock <= 5 && book.stock > 0 ? 'low' : ''} ${book.stock === 0 ? 'out' : ''}">
+                            ${book.stock > 0 ? html(book.stock) + ' In Stock' : 'Out of Stock'}
                         </div>
                     </div>
-                `).join('') : `<p>No products found matching your criteria.</p>`;
+                `).join('') : `<p>No books found matching your criteria.</p>`;
             }
-        }
-        async function globalSearch() {
-            if (!elements.globalSearchInput || !elements.globalSearchResults) return;
-            const query = elements.globalSearchInput.value.trim();
-            if (query.length < 2) {
-                elements.globalSearchResults.innerHTML = '';
-                elements.globalSearchResults.classList.remove('active');
-                return;
-            }
-            const data = await fetchJSON(`index.php?action=global_search_json&query=${encodeURIComponent(query)}`);
-            if (data.success) {
-                elements.globalSearchResults.innerHTML = data.results.length > 0 ? data.results.map(item => `
-                    <div onclick="window.location.href='${html(item.link)}${item.type === 'Book' || item.type === 'Product' ? `#edit-${item.id}` : (item.type === 'Customer' ? `#view-${item.id}` : `#sale-${item.id}`)}'">
-                        <span class="type-label">${html(item.type)}</span> ${html(item.name)}
-                    </div>
-                `).join('') : `<div>No results found.</div>`;
-                elements.globalSearchResults.classList.add('active');
-            }
-        }
-
-        function ucfirst(string) {
-            return string.charAt(0).toUpperCase() + string.slice(1);
         }
 
         function setupEventListeners() {
@@ -8322,23 +6624,6 @@ if ($settings_result) {
                     }
                 });
             });
-            if (elements.globalSearchInput) {
-                let searchTimeout;
-                elements.globalSearchInput.addEventListener('input', () => {
-                    clearTimeout(searchTimeout);
-                    searchTimeout = setTimeout(globalSearch, 300);
-                });
-                elements.globalSearchInput.addEventListener('focus', () => {
-                    if (elements.globalSearchInput.value.length > 1) {
-                        elements.globalSearchResults.classList.add('active');
-                    }
-                });
-                elements.globalSearchInput.addEventListener('blur', () => {
-                    setTimeout(() => {
-                        elements.globalSearchResults.classList.remove('active');
-                    }, 200);
-                });
-            }
             if (elements.addBookBtn) elements.addBookBtn.addEventListener('click', () => openBookModal());
             if (elements.bookSearch) elements.bookSearch.addEventListener('input', () => {
                 pagination.books.currentPage = 1;
@@ -8355,9 +6640,6 @@ if ($settings_result) {
             if (elements.booksNextPage) elements.booksNextPage.addEventListener('click', () => {
                 pagination.books.currentPage++;
                 renderBooks();
-            });
-            if (elements.productType) elements.productType.addEventListener('change', (e) => {
-                toggleBookFields(e.target.value);
             });
             if (elements.bookCoverImage) elements.bookCoverImage.addEventListener('change', (event) => {
                 const file = event.target.files[0];
@@ -8448,37 +6730,40 @@ if ($settings_result) {
                 renderPurchaseOrders();
             });
             if (elements.exportPosBtn) elements.exportPosBtn.addEventListener('click', exportPurchaseOrders);
+            // This block handles adding the selected book from the new dropdown
             if (elements.addSelectedBookBtn) {
                 elements.addSelectedBookBtn.addEventListener('click', () => {
                     const selectedOption = elements.poBookSelect.options[elements.poBookSelect.selectedIndex];
                     if (!selectedOption || !selectedOption.value) {
-                        showToast('Please select a product to add.', 'warning');
+                        showToast('Please select a book to add.', 'warning');
                         return;
                     }
-                    const product = {
+
+                    const book = {
                         id: parseInt(selectedOption.value),
-                        name: selectedOption.dataset.name,
+                        title: selectedOption.dataset.title,
                         price: parseFloat(selectedOption.dataset.price)
                     };
-                    addPoItem(product);
-                    elements.poBookSelect.selectedIndex = 0;
+
+                    addPoItem(book);
+                    elements.poBookSelect.selectedIndex = 0; // Reset dropdown after adding
                 });
             }
             if (elements.bookToCartSearch) elements.bookToCartSearch.addEventListener('input', () => {
                 pagination.booksForCart.currentPage = 1;
-                renderBooksForCart(false);
+                renderBooksForCart();
             });
             if (elements.booksForCartPrevPage) elements.booksForCartPrevPage.addEventListener('click', () => {
                 pagination.booksForCart.currentPage--;
-                renderBooksForCart(false);
+                renderBooksForCart();
             });
             if (elements.booksForCartNextPage) elements.booksForCartNextPage.addEventListener('click', () => {
                 pagination.booksForCart.currentPage++;
-                renderBooksForCart(false);
+                renderBooksForCart();
             });
-            if (elements.clearCartBtn) elements.clearCartBtn.addEventListener('click', () => clearCart(false));
+            if (elements.clearCartBtn) elements.clearCartBtn.addEventListener('click', clearCart);
             if (elements.checkoutBtn) elements.checkoutBtn.addEventListener('click', openCheckoutModal);
-            if (elements.applyPromoBtn) elements.applyPromoBtn.addEventListener('click', () => applyPromotion(false));
+            if (elements.applyPromoBtn) elements.applyPromoBtn.addEventListener('click', applyPromotion);
             if (elements.checkoutForm) elements.checkoutForm.addEventListener('submit', (e) => {
                 elements.checkoutCustomerIdInput.value = elements.checkoutCustomer.value;
                 elements.checkoutPromotionCodeInput.value = elements.checkoutPromotionCode.value;
@@ -8486,7 +6771,7 @@ if ($settings_result) {
             });
             if (elements.checkoutModal) elements.checkoutModal.addEventListener('focusout', (e) => {
                 if (!elements.checkoutModal.contains(e.relatedTarget)) {
-                    renderCart(false);
+                    renderCart();
                 }
             });
             if (elements.viewSalesHistoryBtn) elements.viewSalesHistoryBtn.addEventListener('click', () => window.location.href = 'index.php?page=sales-history');
@@ -8553,10 +6838,6 @@ if ($settings_result) {
                 pagination.publicBooks.currentPage = 1;
                 renderPublicBooks();
             });
-            if (elements.publicProductTypeFilter) elements.publicProductTypeFilter.addEventListener('change', () => {
-                pagination.publicBooks.currentPage = 1;
-                renderPublicBooks();
-            });
             if (elements.publicBookCategoryFilter) elements.publicBookCategoryFilter.addEventListener('change', () => {
                 pagination.publicBooks.currentPage = 1;
                 renderPublicBooks();
@@ -8573,31 +6854,8 @@ if ($settings_result) {
                 pagination.publicBooks.currentPage++;
                 renderPublicBooks();
             });
-            if (elements.onlineOrderSearch) elements.onlineOrderSearch.addEventListener('input', () => {
-                pagination.onlineOrders.currentPage = 1;
-                renderOnlineOrders(false);
-            });
-            if (elements.onlineOrderStatusFilter) elements.onlineOrderStatusFilter.addEventListener('change', () => {
-                pagination.onlineOrders.currentPage = 1;
-                renderOnlineOrders(false);
-            });
-            if (elements.onlineOrdersPrevPage) elements.onlineOrdersPrevPage.addEventListener('click', () => {
-                pagination.onlineOrders.currentPage--;
-                renderOnlineOrders(false);
-            });
-            if (elements.onlineOrdersNextPage) elements.onlineOrdersNextPage.addEventListener('click', () => {
-                pagination.onlineOrders.currentPage++;
-                renderOnlineOrders(false);
-            });
-            if (elements.onlineClearCartBtn) elements.onlineClearCartBtn.addEventListener('click', () => clearCart(true));
-            if (elements.placeOnlineOrderBtn) elements.placeOnlineOrderBtn.addEventListener('click', openOnlineOrderModal);
-            if (elements.onlineApplyPromoBtn) elements.onlineApplyPromoBtn.addEventListener('click', () => applyPromotion(true));
-            if (elements.onlineOrderForm) elements.onlineOrderForm.addEventListener('submit', (e) => {
-                elements.onlineOrderCartItemsInput.value = JSON.stringify(currentCart);
-            });
         }
         document.addEventListener('DOMContentLoaded', async () => {
-            currentCurrencySymbol = "<?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?>";
             if (elements.booksPagination) {
                 pagination.books.elements = {
                     prev: elements.booksPrevPage,
@@ -8654,22 +6912,13 @@ if ($settings_result) {
                     info: elements.publicBooksPageInfo
                 };
             }
-            if (elements.onlineOrdersPagination) {
-                pagination.onlineOrders.elements = {
-                    prev: elements.onlineOrdersPrevPage,
-                    next: elements.onlineOrdersNextPage,
-                    info: elements.onlineOrdersPageInfo
-                };
-            }
             setupEventListeners();
             const initialToastData = document.getElementById('initial-toast-data');
             if (initialToastData) {
                 showToast(initialToastData.dataset.message, initialToastData.dataset.type);
             }
             const currentPage = "<?php echo $page; ?>";
-            if (currentPage === 'dashboard') {
-                await updateDashboard();
-            } else if (currentPage === 'books') {
+            if (currentPage === 'books') {
                 await renderBooks();
             } else if (currentPage === 'customers') {
                 await renderCustomers();
@@ -8678,8 +6927,8 @@ if ($settings_result) {
             } else if (currentPage === 'purchase-orders') {
                 await renderPurchaseOrders();
             } else if (currentPage === 'cart') {
-                await renderBooksForCart(false);
-                await renderCart(false);
+                await renderBooksForCart();
+                await renderCart();
                 const lastSaleId = "<?php echo $_SESSION['last_sale_id'] ?? '';
                                     unset($_SESSION['last_sale_id']); ?>";
                 if (lastSaleId) {
@@ -8690,8 +6939,6 @@ if ($settings_result) {
                 }
             } else if (currentPage === 'sales-history') {
                 await renderSalesHistory();
-            } else if (currentPage === 'online-orders') {
-                await renderOnlineOrders(false);
             } else if (currentPage === 'promotions') {
                 await renderPromotions();
             } else if (currentPage === 'expenses') {
@@ -8720,47 +6967,21 @@ if ($settings_result) {
                     <tr>
                         <td>${html(sale.id)}</td>
                         <td>${formatDate(sale.sale_date)}</td>
-                        <td>${html(sale.item_names)}</td>
+                        <td>${html(sale.item_titles)}</td>
                         <td>${formatCurrency(sale.total)}</td>
                     </tr>
                 `).join('') : `<tr><td colspan="4">You have no past purchases.</td></tr>`;
                         }
                     });
-                await renderOnlineOrders(true);
-            } else if (currentPage === 'online-shop-cart') {
-                await renderCart(true);
-            } else if (currentPage === 'my-orders') {
-                await renderOnlineOrders(true);
             }
-            if (currentPage === 'books-public' || currentPage === 'home') {
+            if (currentPage === 'books-public') {
                 await renderPublicBooks();
-            }
-            if (window.location.hash) {
-                const hash = window.location.hash;
-                if (hash.startsWith('#edit-')) {
-                    const id = hash.split('-')[1];
-                    if (currentPage === 'books' && elements.addBookBtn) {
-                        await openBookModal(id);
-                    }
-                } else if (hash.startsWith('#view-')) {
-                    const id = hash.split('-')[1];
-                    if (currentPage === 'customers' && elements.addCustomerBtn) {
-                        const customerData = await fetchJSON(`index.php?action=get_customers_json&customer_id=${id}`);
-                        if (customerData.success && customerData.customers.length > 0) {
-                            viewCustomerHistory(id, customerData.customers[0].name);
-                        } else {
-                            showToast('Customer not found.', 'error');
-                        }
-                    }
-                } else if (hash.startsWith('#sale-')) {
-                    const id = hash.split('-')[1];
-                    if (currentPage === 'sales-history') {
-                        viewSaleDetails(id);
-                    }
-                }
             }
         });
     </script>
 </body>
 
 </html>
+<?php
+$conn->close();
+?>
