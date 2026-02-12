@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ur" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>بک شاپ مینیجمنٹ سسٹم - صارف گائیڈ</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;700&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            margin: 0;
+            background: #f8fafc;
+            color: #1e293b;
+            font-family: "Noto Nastaliq Urdu", serif;
+            line-height: 2.1;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: auto;
+            padding: 30px 20px 60px;
+        }
+
+        h1, h2, h3 {
+            color: #0f766e;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #475569;
+            margin-bottom: 40px;
+            font-size: 1.05rem;
+        }
+
+        h2 {
+            border-right: 6px solid #0f766e;
+            padding-right: 15px;
+            margin-top: 60px;
+        }
+
+        .card {
+            background: #ffffff;
+            border-radius: 14px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.06);
+            padding: 25px;
+            margin-top: 25px;
+        }
+
+        img {
+            max-width: 100%;
+            border-radius: 12px;
+            margin: 25px 0;
+            border: 1px solid #e2e8f0;
+        }
+
+        ul, ol {
+            padding-right: 25px;
+        }
+
+        li {
+            margin-bottom: 10px;
+        }
+
+        .alert {
+            border-right: 6px solid;
+            padding: 18px;
+            margin-top: 25px;
+            border-radius: 10px;
+            background: #f1f5f9;
+        }
+
+        .important { border-color: #2563eb; }
+        .warning   { border-color: #f59e0b; }
+        .tip       { border-color: #16a34a; }
+        .note      { border-color: #64748b; }
+        .caution   { border-color: #dc2626; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 30px;
+        }
+
+        th, td {
+            border: 1px solid #e2e8f0;
+            padding: 14px;
+            text-align: center;
+        }
+
+        th {
+            background: #f1f5f9;
+            font-weight: bold;
+        }
+
+        footer {
+            margin-top: 80px;
+            text-align: center;
+            color: #475569;
+            font-size: 1rem;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+
+<h1>📘 بک شاپ مینیجمنٹ سسٹم</h1>
+<p class="subtitle">Bookshop Management System - Visual User Manual</p>
+
+<p>
+یہ دستاویز بک شاپ مینیجمنٹ سسٹم کے تمام اہم فیچرز کی تفصیلی رہنمائی فراہم کرتی ہے۔
+ہر سیکشن میں اسکرین شاٹ اور اردو میں تفصیلی وضاحت شامل ہے۔
+</p>
+
+<!-- 1 Dashboard -->
+<h2>1. ڈیش بورڈ (Dashboard)</h2>
+<div class="card">
+    <img src="dashboard_page_1769705115014.png" alt="ڈیش بورڈ">
+
+    <h3>فیچر کا نام</h3>
+    <strong>ڈیش بورڈ (Dashboard)</strong> - مرکزی کنٹرول پینل
+
+    <h3>استعمال کا طریقہ</h3>
+    <ul>
+        <li><strong>Total Books</strong>: کتابوں کی کل تعداد</li>
+        <li><strong>Total Customers</strong>: گاہکوں کی کل تعداد</li>
+        <li><strong>Books Low in Stock</strong>: کم اسٹاک والی کتابیں</li>
+        <li><strong>Today's Sales</strong>: آج کی مجموعی فروخت</li>
+    </ul>
+
+    <div class="alert important">
+        <strong>اہم معلومات</strong>
+        بائیں جانب موجود نیویگیشن مینو سے تمام سیکشنز تک رسائی حاصل کی جا سکتی ہے۔  
+        "Books Low in Stock" کا الرٹ اسٹاک ختم ہونے سے پہلے آگاہ کرتا ہے۔  
+        "Recent Sales" ٹیبل میں تازہ فروخت دیکھی جا سکتی ہے۔
+    </div>
+</div>
+
+<!-- 2 Books -->
+<h2>2. کتابوں کا انتظام (Books Management)</h2>
+<div class="card">
+    <img src="books_management_page_1769705164955.png" alt="کتابوں کا انتظام">
+
+    <ol>
+        <li>نئی کتاب شامل کرنے کے لیے <strong>+ Add New Book</strong> پر کلک کریں</li>
+        <li>سرچ بار میں کتاب، مصنف، ISBN یا زمرہ درج کریں</li>
+        <li>Title (A-Z) یا دیگر فلٹرز استعمال کریں</li>
+        <li><strong>Restock</strong> سے اسٹاک بڑھائیں</li>
+        <li><strong>Edit</strong> سے کتاب میں تبدیلی کریں</li>
+        <li>ڈیٹا ایکسپورٹ یا امپورٹ کریں</li>
+    </ol>
+
+    <div class="alert warning">
+        <strong>انتباہ</strong>
+        نارنجی رنگ میں ہائی لائٹ کتابوں کا اسٹاک کم ہے۔
+    </div>
+</div>
+
+<!-- 3 Customers -->
+<h2>3. گاہکوں کا انتظام (Customers Management)</h2>
+<div class="card">
+    <img src="customers_management_page_1769705208562.png" alt="گاہکوں کا انتظام">
+
+    <ol>
+        <li><strong>+ Add New Customer</strong> سے نیا گاہک شامل کریں</li>
+        <li>نام، فون یا ای میل سے تلاش کریں</li>
+        <li>Active یا Inactive فلٹر استعمال کریں</li>
+        <li><strong>History</strong> سے خریداری دیکھیں</li>
+        <li><strong>Edit</strong> سے معلومات اپڈیٹ کریں</li>
+        <li><strong>Deactivate</strong> سے اکاؤنٹ بند کریں</li>
+    </ol>
+
+    <div class="alert tip">
+        <strong>ٹِپ</strong>
+        Pagination اور ایکسپورٹ/امپورٹ کی سہولت دستیاب ہے۔
+    </div>
+</div>
+
+<!-- 4 Suppliers -->
+<h2>4. سپلائرز کا انتظام (Suppliers Management)</h2>
+<div class="card">
+    <img src="suppliers_management_page_1769705250612.png" alt="سپلائرز">
+
+    <div class="alert note">
+        سپلائرز کی مکمل رابطہ معلومات محفوظ رکھیں۔
+        پرچیز آرڈرز میں یہی فہرست استعمال ہوگی۔
+    </div>
+</div>
+
+<!-- 5 Purchase Orders -->
+<h2>5. پرچیز آرڈرز (Purchase Orders)</h2>
+<div class="card">
+    <img src="purchase_orders_page_1769705306729.png" alt="پرچیز آرڈرز">
+
+    <div class="alert important">
+        PO ID، سپلائر، تاریخ، سٹیٹس اور کل قیمت دیکھی جا سکتی ہے۔
+        یہ فیچر انوینٹری کے لیے نہایت اہم ہے۔
+    </div>
+</div>
+
+<!-- 6 POS -->
+<h2>6. کارٹ اور فروخت (Cart & Sales - POS)</h2>
+<div class="card">
+    <img src="cart_and_sales_page_1769705368047.png" alt="POS">
+
+    <div class="alert tip">
+        کارٹ کا کل بل خودکار طور پر کیلکولیٹ ہوتا ہے۔
+        پرومو کوڈ چیک آؤٹ پر لگایا جا سکتا ہے۔
+    </div>
+</div>
+
+<!-- 7 Promotions -->
+<h2>7. پروموشنز اور ڈسکاؤنٹس</h2>
+<div class="card">
+    <img src="promotions_management_page_1769705429910.png" alt="پروموشنز">
+
+    <div class="alert caution">
+        No End Date والی پروموشنز ہمیشہ فعال رہتی ہیں۔
+        احتیاط سے استعمال کریں۔
+    </div>
+</div>
+
+<!-- 8 Expenses -->
+<h2>8. اخراجات کا ریکارڈ (Expense Tracking)</h2>
+<div class="card">
+    <img src="expenses_management_page_1769705471428.png" alt="اخراجات">
+
+    <div class="alert note">
+        ماہانہ اخراجات کا خودکار حساب ہوتا ہے۔
+        ہر اندراج Edit یا Delete کیا جا سکتا ہے۔
+    </div>
+</div>
+
+<!-- Navigation -->
+<h2>نیویگیشن مینو</h2>
+<table>
+    <tr>
+        <th>آئیکن</th>
+        <th>سیکشن</th>
+        <th>مقصد</th>
+    </tr>
+    <tr><td>🏠</td><td>Dashboard</td><td>خلاصہ</td></tr>
+    <tr><td>📚</td><td>Books</td><td>کتابوں کا انتظام</td></tr>
+    <tr><td>👥</td><td>Customers</td><td>گاہکوں کا ریکارڈ</td></tr>
+    <tr><td>🏭</td><td>Suppliers</td><td>سپلائرز</td></tr>
+    <tr><td>📦</td><td>Purchase Orders</td><td>خریداری آرڈرز</td></tr>
+    <tr><td>🛒</td><td>Cart & Sales</td><td>فروخت</td></tr>
+    <tr><td>🏷️</td><td>Promotions</td><td>ڈسکاؤنٹس</td></tr>
+    <tr><td>💰</td><td>Expenses</td><td>اخراجات</td></tr>
+</table>
+
+<footer>
+    <strong>تیاری کی تاریخ:</strong> 29 جنوری 2026  
+    <br>Bookshop Management System – مکمل صارف گائیڈ
+</footer>
+
+</div>
+</body>
+</html>
