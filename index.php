@@ -2258,8 +2258,13 @@ if (isset($_POST['action'])) {
                     }
                     $subtotal += $book_data['price'] * $cart_item['quantity'];
                     $cart_item['price_per_unit'] = $book_data['price'];
-                    $cart_item['discount_per_unit'] = 0;
+
+                    // Apply manual POS discount if set
+                    $manual_disc = isset($cart_item['custom_discount']) ? (float) $cart_item['custom_discount'] : 0;
+                    $cart_item['discount_per_unit'] = min($manual_disc, $book_data['price']);
                     $cart_item['category'] = $book_data['category'];
+
+                    $total_discount += ($cart_item['discount_per_unit'] * $cart_item['quantity']);
                 }
                 unset($cart_item);
                 if ($promotion_code) {
@@ -2271,11 +2276,12 @@ if (isset($_POST['action'])) {
                     if ($promotion) {
                         if ($promotion['applies_to'] === 'all') {
                             $discount_amount = ($promotion['type'] === 'percentage') ? ($subtotal * ($promotion['value'] / 100)) : $promotion['value'];
-                            $total_discount = min($discount_amount, $subtotal);
+                            $promo_discount = min($discount_amount, $subtotal - $total_discount);
+                            $total_discount += $promo_discount;
                             if ($subtotal > 0) {
                                 foreach ($cart_items as &$cart_item) {
                                     $item_subtotal_proportion = ($cart_item['price_per_unit'] * $cart_item['quantity']) / $subtotal;
-                                    $cart_item['discount_per_unit'] = ($total_discount * $item_subtotal_proportion) / $cart_item['quantity'];
+                                    $cart_item['discount_per_unit'] += ($promo_discount * $item_subtotal_proportion) / $cart_item['quantity'];
                                 }
                             }
                             unset($cart_item);
@@ -2284,8 +2290,9 @@ if (isset($_POST['action'])) {
                                 if ($cart_item['bookId'] == $promotion['applies_to_value']) {
                                     $item_total_price = $cart_item['price_per_unit'] * $cart_item['quantity'];
                                     $discount_amount = ($promotion['type'] === 'percentage') ? ($item_total_price * ($promotion['value'] / 100)) : $promotion['value'];
-                                    $cart_item['discount_per_unit'] = min($discount_amount / $cart_item['quantity'], $cart_item['price_per_unit']);
-                                    $total_discount += ($cart_item['discount_per_unit'] * $cart_item['quantity']);
+                                    $added_discount = min($discount_amount / $cart_item['quantity'], $cart_item['price_per_unit'] - $cart_item['discount_per_unit']);
+                                    $cart_item['discount_per_unit'] += $added_discount;
+                                    $total_discount += ($added_discount * $cart_item['quantity']);
                                 }
                             }
                             unset($cart_item);
@@ -2294,8 +2301,9 @@ if (isset($_POST['action'])) {
                                 if ($cart_item['category'] === $promotion['applies_to_value']) {
                                     $item_total_price = $cart_item['price_per_unit'] * $cart_item['quantity'];
                                     $discount_amount = ($promotion['type'] === 'percentage') ? ($item_total_price * ($promotion['value'] / 100)) : $promotion['value'];
-                                    $cart_item['discount_per_unit'] = min($discount_amount / $cart_item['quantity'], $cart_item['price_per_unit']);
-                                    $total_discount += ($cart_item['discount_per_unit'] * $cart_item['quantity']);
+                                    $added_discount = min($discount_amount / $cart_item['quantity'], $cart_item['price_per_unit'] - $cart_item['discount_per_unit']);
+                                    $cart_item['discount_per_unit'] += $added_discount;
+                                    $total_discount += ($added_discount * $cart_item['quantity']);
                                 }
                             }
                             unset($cart_item);
@@ -6025,7 +6033,43 @@ if ($settings_result) {
             opacity: 1;
             visibility: visible;
         }
-
+        .pos-wrapper { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; height: calc(100vh - 140px); }
+        .pos-main-panel { display: flex; flex-direction: column; height: 100%; overflow: hidden; background: var(--surface-color); border-radius: 16px; border: 1px solid var(--border-color); box-shadow: 0 12px 28px var(--shadow-color); padding: 16px; }
+        .pos-header-controls { display: flex; gap: 10px; margin-bottom: 16px; }
+        .pos-header-controls input, .pos-header-controls select { flex: 1; min-height: 42px; border-radius: 10px; border: 1px solid var(--border-color); padding: 0 12px; background: var(--background-color); color: var(--text-color); }
+        .pos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; overflow-y: auto; padding-right: 5px; flex-grow: 1; align-content: flex-start; padding-top: 10px; }
+        .pos-card { border: 1px solid var(--border-color); border-radius: 12px; padding: 10px; text-align: center; cursor: pointer; transition: 0.2s ease; background: var(--background-color); position: relative; user-select: none; }
+        .pos-card:hover { border-color: var(--primary-color); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .pos-card img { width: 100%; height: 90px; object-fit: contain; margin-bottom: 8px; border-radius: 8px; }
+        .pos-card .title { font-size: 0.85rem; font-weight: 600; line-height: 1.2; margin-bottom: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .pos-card .price { font-weight: 700; color: var(--primary-color); font-size: 0.95rem; }
+        .pos-card .stock-badge { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.7); color: #fff; font-size: 0.7rem; padding: 2px 6px; border-radius: 6px; font-weight: 600; }
+        
+        .pos-cart-panel { background: var(--surface-color); border-radius: 16px; border: 1px solid var(--border-color); box-shadow: 0 12px 28px var(--shadow-color); display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+        .pos-cart-header { padding: 16px; border-bottom: 1px solid var(--border-color); font-weight: 700; font-size: 1.1rem; display: flex; justify-content: space-between; align-items: center; }
+        .pos-cart-items-wrap { flex-grow: 1; overflow-y: auto; padding: 10px; }
+        .pos-cart-item { background: var(--background-color); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+        .pos-cart-item-title { font-weight: 600; font-size: 0.9rem; margin-bottom: 8px; display: flex; justify-content: space-between; }
+        .pos-cart-item-controls { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+        .pos-qty-group { display: flex; align-items: center; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; background: var(--surface-color); }
+        .pos-qty-group button { background: transparent; border: none; padding: 6px 10px; cursor: pointer; color: var(--text-color); font-weight: bold; }
+        .pos-qty-group button:hover { background: rgba(0,0,0,0.05); }
+        .pos-qty-group input { width: 40px; border: none; text-align: center; font-weight: 600; background: transparent; color: var(--text-color); -moz-appearance: textfield; }
+        .pos-qty-group input::-webkit-outer-spin-button, .pos-qty-group input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .pos-disc-group { display: flex; align-items: center; gap: 5px; }
+        .pos-disc-group label { font-size: 0.75rem; color: var(--light-text-color); font-weight: 600; text-transform: uppercase; }
+        .pos-disc-group input { width: 60px; padding: 5px; border: 1px solid var(--border-color); border-radius: 6px; text-align: right; font-size: 0.85rem; background: var(--surface-color); color: var(--text-color); }
+        
+        .pos-totals-panel { background: var(--background-color); padding: 16px; border-top: 1px solid var(--border-color); }
+        .pos-summary-row { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9rem; color: var(--light-text-color); }
+        .pos-summary-row.grand { font-size: 1.3rem; font-weight: 700; color: var(--primary-color); border-top: 1px dashed var(--border-color); padding-top: 10px; margin-top: 5px; margin-bottom: 12px; }
+        .pos-action-btns { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
+        .pos-action-btns .btn { padding: 14px; font-size: 1rem; border-radius: 12px; }
+        
+        @media (max-width: 1024px) {
+            .pos-wrapper { grid-template-columns: 1fr; height: auto; }
+            .pos-cart-panel { height: 500px; }
+        }
         @media (max-width: 1100px) {
             aside.sidebar {
                 width: 224px;
@@ -7488,83 +7532,62 @@ if ($settings_result) {
                     }
                     ?>
                         <section id="cart" class="page-content <?php echo $page === 'cart' ? 'active' : ''; ?>">
-                            <div class="page-header">
-                                <h1>POS (Cart)</h1>
+                            <div class="page-header" style="margin-bottom: 10px;">
+                                <h1>Point of Sale Register</h1>
                                 <div style="display: flex; gap: 10px;">
-                                    <button class="btn btn-secondary" id="view-sales-history-btn"><i class="fas fa-history"></i>
-                                        View Sales History</button>
+                                    <button class="btn btn-secondary" id="view-sales-history-btn"><i class="fas fa-history"></i> Sales History</button>
                                 </div>
                             </div>
-                            <div class="card">
-                                <div class="card-header">Add Products to Cart</div>
-                                <div class="search-sort-controls" style="margin-top: 0;">
-                                    <div class="form-group">
-                                        <div class="inline-input-group"><input type="text" id="book-to-cart-search" placeholder="Search product to add to cart..."><button type="button" class="btn btn-secondary barcode-scan-btn" id="scan-pos-barcode-btn"><i class="fas fa-barcode"></i> Scan</button></div>
+                            
+                            <div class="pos-wrapper">
+                                <!-- Left Panel: Products -->
+                                <div class="pos-main-panel">
+                                    <div class="pos-header-controls">
+                                        <input type="text" id="book-to-cart-search" placeholder="Search by name or barcode...">
+                                        <select id="pos-category-filter"><option value="all">All Categories</option></select>
+                                        <button type="button" class="btn btn-secondary" id="scan-pos-barcode-btn" style="border-radius: 10px;"><i class="fas fa-barcode"></i> Scan</button>
+                                    </div>
+                                    <div class="pos-grid" id="books-for-cart-list">
+                                        <!-- Products injected here -->
                                     </div>
                                 </div>
-                                <div class="table-responsive">
-                                    <table class="data-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Name</th>
-                                                <th>Author/Type</th>
-                                                <th>Price</th>
-                                                <th>Stock</th>
-                                                <th>Action</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="books-for-cart-list">
-                                            <tr>
-                                                <td colspan="5">Loading products...</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                    <div class="pagination" id="books-for-cart-pagination">
-                                        <button id="books-for-cart-prev-page" disabled><i class="fas fa-chevron-left"></i>
-                                            Previous</button>
-                                        <span id="books-for-cart-page-info">Page 1 of 1</span>
-                                        <button id="books-for-cart-next-page" disabled>Next <i class="fas fa-chevron-right"></i>
-                                        </button>
+                                
+                                <!-- Right Panel: Cart & Checkout -->
+                                <div class="pos-cart-panel">
+                                    <div class="pos-cart-header">
+                                        Current Order
+                                        <span class="status-pill success" id="cart-total-items" style="font-size: 14px;">0</span>
                                     </div>
-                                </div>
-                            </div>
-                            <div class="card" style="margin-top: 30px;">
-                                <div class="card-header">Current Cart (<span id="cart-total-items">0</span> items)</div>
-                                <div class="table-responsive">
-                                    <table class="data-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Name</th>
-                                                <th>Price</th>
-                                                <th>Quantity</th>
-                                                <th>Discount</th>
-                                                <th>Subtotal</th>
-                                                <th>Actions</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="cart-items-table">
-                                            <tr>
-                                                <td colspan="6">Cart is empty.</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-                                <div id="cart-summary">
-                                    <span>Total:</span>
-                                    <span id="cart-grand-total"><?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?> 0.00</span>
-                                </div>
-                                <div id="cart-promo-section" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
-                                    <div class="form-group">
-                                        <label for="checkout-promotion-code">Promotion Code (Optional)</label>
-                                        <input type="text" id="checkout-promotion-code" placeholder="Enter promo code">
-                                        <button type="button" class="btn btn-sm btn-info" id="apply-promo-btn" style="margin-top: 5px;">Apply</button>
+                                    
+                                    <div class="pos-cart-items-wrap" id="cart-items-table">
+                                        <div style="text-align:center; padding: 30px 10px; color: var(--light-text-color);">Cart is empty. Tap products to add.</div>
                                     </div>
-                                    <p id="promo-message" style="color: var(--danger-color); font-size: 0.9em;"></p>
-                                </div>
-                                <div id="cart-actions">
-                                    <button class="btn btn-danger" id="clear-cart-btn" disabled><i class="fas fa-trash"></i> Clear
-                                        Cart</button>
-                                    <button class="btn btn-success" id="checkout-btn" disabled><i class="fas fa-money-check-alt"></i> Checkout</button>
+                                    
+                                    <div class="pos-totals-panel">
+                                        <div class="pos-summary-row">
+                                            <span>Subtotal:</span>
+                                            <span id="cart-subtotal-display"><?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?> 0.00</span>
+                                        </div>
+                                        <div class="pos-summary-row">
+                                            <span>Total Discount:</span>
+                                            <span id="cart-discount-display"><?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?> 0.00</span>
+                                        </div>
+                                        <div class="pos-summary-row grand">
+                                            <span>Total:</span>
+                                            <span id="cart-grand-total"><?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?> 0.00</span>
+                                        </div>
+                                        
+                                        <div style="display:flex; gap:10px; margin-bottom: 15px;">
+                                            <input type="text" id="checkout-promotion-code" placeholder="Promo Code" style="flex:1; border-radius:10px; border: 1px solid var(--border-color); padding:0 12px; background: var(--surface-color); color: var(--text-color);">
+                                            <button type="button" class="btn btn-info" id="apply-promo-btn" style="border-radius:10px;">Apply</button>
+                                        </div>
+                                        <p id="promo-message" style="color: var(--danger-color); font-size: 0.85em; margin-bottom: 10px; text-align:center;"></p>
+                                        
+                                        <div class="pos-action-btns">
+                                            <button class="btn btn-danger" id="clear-cart-btn" disabled><i class="fas fa-trash"></i></button>
+                                            <button class="btn btn-success" id="checkout-btn" disabled><i class="fas fa-money-check-alt"></i> Checkout</button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </section>
@@ -9049,6 +9072,7 @@ if ($settings_result) {
             booksForCartPrevPage: document.getElementById('books-for-cart-prev-page'),
             booksForCartNextPage: document.getElementById('books-for-cart-next-page'),
             booksForCartPageInfo: document.getElementById('books-for-cart-page-info'),
+            posCategoryFilter: document.getElementById('pos-category-filter'),
             cartTotalItems: document.getElementById('cart-total-items'),
             cartItemsTable: document.getElementById('cart-items-table'),
             cartGrandTotal: document.getElementById('cart-grand-total'),
@@ -10088,28 +10112,19 @@ if ($settings_result) {
             elements.poItemsInput.value = JSON.stringify(currentPoItems);
         }
         async function renderBooksForCart(isOnlineCart = false) {
-            const listElement = isOnlineCart ? elements.publicBooksList : elements.booksForCartList;
-            const paginationConfig = isOnlineCart ? pagination.publicBooks : pagination.booksForCart;
-            const searchElement = isOnlineCart ? elements.publicBookSearch : elements.bookToCartSearch;
-            const categoryElement = isOnlineCart ? elements.publicBookCategoryFilter : null;
-            const productTypeElement = isOnlineCart ? elements.publicProductTypeFilter : null;
-            const sortElement = isOnlineCart ? elements.publicBookSort : null;
-            if (!listElement) return;
-            const search = searchElement ? searchElement.value : '';
-            const category = categoryElement ? categoryElement.value : 'all';
-            const product_type = productTypeElement ? productTypeElement.value : 'all';
-            const sort = sortElement ? sortElement.value : 'name-asc';
-            const page = paginationConfig.currentPage;
-            let apiUrl = `index.php?action=get_books_for_cart_json&search=${encodeURIComponent(search)}&page_num=${page}`;
             if (isOnlineCart) {
-                apiUrl = `index.php?action=get_public_books_json&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}&product_type=${encodeURIComponent(product_type)}&sort=${sort}&page_num=${page}`;
-            }
-            const data = await fetchJSON(apiUrl);
-            if (data.success) {
-                const products = data.books;
-                updatePaginationControls(paginationConfig, data.total_items);
-                if (isOnlineCart) {
-                    listElement.innerHTML = products.length > 0 ? products.map(product => `
+                const listElement = elements.publicBooksList;
+                const paginationConfig = pagination.publicBooks;
+                if (!listElement) return;
+                const search = elements.publicBookSearch ? elements.publicBookSearch.value : '';
+                const category = elements.publicBookCategoryFilter ? elements.publicBookCategoryFilter.value : 'all';
+                const product_type = elements.publicProductTypeFilter ? elements.publicProductTypeFilter.value : 'all';
+                const sort = elements.publicBookSort ? elements.publicBookSort.value : 'name-asc';
+                const page = paginationConfig.currentPage;
+                const data = await fetchJSON(`index.php?action=get_public_books_json&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}&product_type=${encodeURIComponent(product_type)}&sort=${sort}&page_num=${page}`);
+                if (data.success) {
+                    updatePaginationControls(paginationConfig, data.total_items);
+                    listElement.innerHTML = data.books.length > 0 ? data.books.map(product => `
                         <div class="book-card">
                             <img src="${product.cover_image ? html(product.cover_image) : 'https://via.placeholder.com/150x200?text=No+Cover'}" alt="${html(product.name)}">
                             <h3>${html(product.name)}</h3>
@@ -10121,29 +10136,41 @@ if ($settings_result) {
                             <div class="public-product-actions">
                                 <a href="https://wa.me/<?php echo html($public_settings['whatsapp_number'] ?? ''); ?>?text=Hello,%20I%20would%20like%20to%20order%20${encodeURIComponent(html(product.name))}%20-%20Price:%20${encodeURIComponent(formatCurrency(html(product.price)))}." target="_blank" class="whatsapp-btn"><i class="fab fa-whatsapp"></i> WhatsApp</a>
                                 ${<?php echo isCustomer() ? 'true' : 'false'; ?> ? `
-                                    <button class="btn btn-primary" onclick="addToCart(${html(product.id)}, '${html(product.name)}', ${html(product.price)}, true)" ${product.stock <= 0 ? 'disabled' : ''}><i class="fas fa-cart-plus"></i> Add to Cart</button>
+                                    <button class="btn btn-primary" onclick="addToCart(${html(product.id)}, '${html(product.name.replace(/'/g, "\\'"))}', ${html(product.price)}, true)" ${product.stock <= 0 ? 'disabled' : ''}><i class="fas fa-cart-plus"></i> Add to Cart</button>
                                 ` : `
                                     <a href="index.php?page=customer-login" class="btn btn-primary"><i class="fas fa-user-circle"></i> Login to Order</a>
                                 `}
                             </div>
                         </div>
                     `).join('') : `<p>No products found matching your criteria.</p>`;
-                } else {
-                    listElement.innerHTML = products.length > 0 ? products.map(product => {
+                }
+            } else {
+                // Admin/Staff POS layout
+                if (!elements.booksForCartList) return;
+                const search = elements.bookToCartSearch ? elements.bookToCartSearch.value : '';
+                const category = elements.posCategoryFilter ? elements.posCategoryFilter.value : 'all';
+                const data = await fetchJSON(`index.php?action=get_sidebar_products_json&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}`);
+                if (data.success) {
+                    if (elements.posCategoryFilter && elements.posCategoryFilter.options.length <= 1) {
+                        data.categories.forEach(cat => {
+                            const opt = document.createElement('option');
+                            opt.value = cat;
+                            opt.textContent = cat;
+                            elements.posCategoryFilter.appendChild(opt);
+                        });
+                    }
+                    elements.booksForCartList.innerHTML = data.books.length > 0 ? data.books.map(product => {
                         const inCartQuantity = currentCart.find(item => item.bookId === product.id)?.quantity || 0;
                         const availableStock = product.stock - inCartQuantity;
+                        const outOfStock = availableStock <= 0;
                         return `
-                            <tr>
-                                <td>${html(product.name)}</td>
-                                <td>${html(product.author || ucfirst(product.product_type))}</td>
-                                <td>${formatCurrency(product.price)}</td>
-                                <td class="${availableStock < 5 && availableStock > 0 ? 'low-stock' : (availableStock <= 0 ? 'danger' : '')}">${html(availableStock)}</td>
-                                <td>
-                                    <button class="btn btn-primary btn-sm" onclick="addToCart(${html(product.id)}, '${html(product.name)}', ${html(product.price)})" ${availableStock <= 0 ? 'disabled' : ''}><i class="fas fa-cart-plus"></i> Add to Cart</button>
-                                </td>
-                            </tr>
+                            <div class="pos-card ${outOfStock ? 'disabled' : ''}" onclick="if(!${outOfStock}) addToCart(${html(product.id)}, '${html(product.name.replace(/'/g, "\\'"))}', ${html(product.price)}, false)" style="${outOfStock ? 'opacity:0.5; cursor:not-allowed;' : ''}">
+                                <div class="stock-badge" style="background:${outOfStock ? 'var(--danger-color)' : 'var(--primary-color)'}">${outOfStock ? 'Out' : availableStock}</div>
+                                <div class="title" title="${html(product.name)}">${html(product.name)}</div>
+                                <div class="price">${formatCurrency(product.price)}</div>
+                            </div>
                         `;
-                    }).join('') : `<tr><td colspan="5">No products found to add to cart.</td></tr>`;
+                    }).join('') : `<div style="grid-column: 1/-1; text-align:center; padding: 20px; color: var(--light-text-color);">No products found.</div>`;
                 }
             }
         }
@@ -10234,16 +10261,26 @@ if ($settings_result) {
                     console.error(`Product ID ${item.bookId} not found for cart calculation.`);
                 }
             }
+            // First apply manual discounts per item
+            for (const item of currentCart) {
+                if (item.custom_discount && item.custom_discount > 0) {
+                    const manualDisc = Math.min(item.custom_discount, item.price);
+                    item.discount_per_unit = manualDisc;
+                    totalDiscount += (manualDisc * item.quantity);
+                }
+            }
+
             if (appliedPromotion) {
                 if (appliedPromotion.applies_to === 'all') {
                     const discountAmount = appliedPromotion.type === 'percentage' ?
                         subtotal * (appliedPromotion.value / 100) :
                         appliedPromotion.value;
-                    totalDiscount = Math.min(discountAmount, subtotal);
+                    const promoDiscount = Math.min(discountAmount, subtotal - totalDiscount);
+                    totalDiscount += promoDiscount;
                     if (subtotal > 0) {
                         for (const item of currentCart) {
                             const itemValue = item.price * item.quantity;
-                            item.discount_per_unit = (totalDiscount * (itemValue / subtotal)) / item.quantity;
+                            item.discount_per_unit += (promoDiscount * (itemValue / subtotal)) / item.quantity;
                         }
                     }
                 } else {
@@ -10254,8 +10291,9 @@ if ($settings_result) {
                             const discountAmountForItem = appliedPromotion.type === 'percentage' ?
                                 itemTotalPrice * (appliedPromotion.value / 100) :
                                 appliedPromotion.value;
-                            item.discount_per_unit = Math.min(discountAmountForItem / item.quantity, item.price);
-                            totalDiscount += (item.discount_per_unit * item.quantity);
+                            const added_discount = Math.min(discountAmountForItem / item.quantity, item.price - item.discount_per_unit);
+                            item.discount_per_unit += added_discount;
+                            totalDiscount += (added_discount * item.quantity);
                         }
                     }
                 }
@@ -10268,63 +10306,98 @@ if ($settings_result) {
                 total: finalTotal
             };
         }
+        async function updateCartItemDiscount(bookId, val) {
+            const item = currentCart.find(i => i.bookId === bookId);
+            if (item) {
+                item.custom_discount = Math.max(0, parseFloat(val) || 0);
+                if (item.custom_discount > item.price) item.custom_discount = item.price;
+                renderCart();
+            }
+        }
+
         async function renderCart(isOnlineCart = false) {
             fetch('index.php?action=update_session_cart', {
                 method: 'POST',
                 keepalive: true,
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    cart: currentCart,
-                    promotion: appliedPromotion
-                })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cart: currentCart, promotion: appliedPromotion })
             }).catch(console.error);
-            const tableElement = isOnlineCart ? elements.onlineCartItemsTable : elements.cartItemsTable;
+            
+            const containerElement = isOnlineCart ? elements.onlineCartItemsTable : elements.cartItemsTable;
             const totalItemsSpan = isOnlineCart ? elements.onlineCartTotalItems : elements.cartTotalItems;
             const grandTotalSpan = isOnlineCart ? elements.onlineCartGrandTotal : elements.cartGrandTotal;
             const clearBtn = isOnlineCart ? elements.onlineClearCartBtn : elements.clearCartBtn;
             const checkoutBtn = isOnlineCart ? elements.placeOnlineOrderBtn : elements.checkoutBtn;
-            const {
-                subtotal,
-                discount,
-                total
-            } = await calculateCartTotals(isOnlineCart);
+            
+            const { subtotal, discount, total } = await calculateCartTotals(isOnlineCart);
+            
             totalItemsSpan.textContent = currentCart.reduce((sum, item) => sum + item.quantity, 0);
+            
             if (currentCart.length === 0) {
-                tableElement.innerHTML = `<tr><td colspan="6">Cart is empty.</td></tr>`;
+                containerElement.innerHTML = isOnlineCart ? `<tr><td colspan="6">Cart is empty.</td></tr>` : `<div style="text-align:center; padding: 30px 10px; color: var(--light-text-color);">Cart is empty. Tap products to add.</div>`;
                 clearBtn.disabled = true;
                 checkoutBtn.disabled = true;
                 if (elements.checkoutPromotionCode && !isOnlineCart) elements.checkoutPromotionCode.value = '';
                 if (elements.onlineCheckoutPromotionCode && isOnlineCart) elements.onlineCheckoutPromotionCode.value = '';
                 appliedPromotion = null;
             } else {
-                tableElement.innerHTML = currentCart.map(item => {
-                    const itemSubtotal = item.price * item.quantity;
-                    const itemDiscount = item.discount_per_unit * item.quantity;
-                    const itemNetTotal = itemSubtotal - itemDiscount;
-                    return `
-                        <tr>
-                            <td>${html(item.name)}</td>
-                            <td>${formatCurrency(item.price)}</td>
-                            <td class="quantity-controls">
-                                <button type="button" class="btn btn-secondary btn-sm" onclick="updateCartItemQuantity(${html(item.bookId)}, ${item.quantity - 1}, ${isOnlineCart})">-</button>
-                                <input type="number" value="${html(item.quantity)}" min="1" onchange="updateCartItemQuantity(${html(item.bookId)}, parseInt(this.value), ${isOnlineCart})">
-                                <button type="button" class="btn btn-secondary btn-sm" onclick="updateCartItemQuantity(${html(item.bookId)}, ${item.quantity + 1}, ${isOnlineCart})">+</button>
-                            </td>
-                            <td>${itemDiscount > 0 ? formatCurrency(itemDiscount) : 'N/A'}</td>
-                            <td>${formatCurrency(itemNetTotal)}</td>
-                            <td class="actions">
-                                <button type="button" class="btn btn-danger btn-sm" onclick="removeCartItem(${html(item.bookId)}, ${isOnlineCart})"><i class="fas fa-trash"></i> Remove</button>
-                            </td>
-                        </tr>
-                    `;
-                }).join('');
+                if (isOnlineCart) {
+                    containerElement.innerHTML = currentCart.map(item => {
+                        const itemNetTotal = (item.price * item.quantity) - (item.discount_per_unit * item.quantity);
+                        return `
+                            <tr>
+                                <td>${html(item.name)}</td>
+                                <td>${formatCurrency(item.price)}</td>
+                                <td class="quantity-controls">
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="updateCartItemQuantity(${html(item.bookId)}, ${item.quantity - 1}, true)">-</button>
+                                    <input type="number" value="${html(item.quantity)}" min="1" onchange="updateCartItemQuantity(${html(item.bookId)}, parseInt(this.value), true)">
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="updateCartItemQuantity(${html(item.bookId)}, ${item.quantity + 1}, true)">+</button>
+                                </td>
+                                <td>${item.discount_per_unit > 0 ? formatCurrency(item.discount_per_unit * item.quantity) : 'N/A'}</td>
+                                <td>${formatCurrency(itemNetTotal)}</td>
+                                <td class="actions">
+                                    <button type="button" class="btn btn-danger btn-sm" onclick="removeCartItem(${html(item.bookId)}, true)"><i class="fas fa-trash"></i></button>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('');
+                } else {
+                    containerElement.innerHTML = currentCart.map(item => {
+                        const itemNetTotal = (item.price * item.quantity) - ((item.custom_discount || 0) * item.quantity);
+                        return `
+                            <div class="pos-cart-item">
+                                <div class="pos-cart-item-title">
+                                    <span>${html(item.name)}</span>
+                                    <span style="color:var(--primary-color);">${formatCurrency(itemNetTotal)}</span>
+                                </div>
+                                <div class="pos-cart-item-controls">
+                                    <div class="pos-qty-group">
+                                        <button type="button" onclick="updateCartItemQuantity(${html(item.bookId)}, ${item.quantity - 1}, false)">-</button>
+                                        <input type="number" value="${html(item.quantity)}" min="1" onchange="updateCartItemQuantity(${html(item.bookId)}, parseInt(this.value), false)">
+                                        <button type="button" onclick="updateCartItemQuantity(${html(item.bookId)}, ${item.quantity + 1}, false)">+</button>
+                                    </div>
+                                    <div class="pos-disc-group">
+                                        <label>Disc:</label>
+                                        <input type="number" step="0.01" min="0" max="${item.price}" placeholder="0.00" value="${item.custom_discount ? Number(item.custom_discount).toFixed(2) : ''}" onchange="updateCartItemDiscount(${html(item.bookId)}, this.value)">
+                                    </div>
+                                    <button type="button" class="btn btn-danger btn-sm" style="padding: 6px 10px;" onclick="removeCartItem(${html(item.bookId)}, false)"><i class="fas fa-trash"></i></button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
                 clearBtn.disabled = false;
                 checkoutBtn.disabled = false;
             }
+            
             grandTotalSpan.textContent = formatCurrency(total);
+            
             if (!isOnlineCart && elements.checkoutSubtotal) {
+                const subEl = document.getElementById('cart-subtotal-display');
+                const discEl = document.getElementById('cart-discount-display');
+                if (subEl) subEl.textContent = formatCurrency(subtotal);
+                if (discEl) discEl.textContent = formatCurrency(discount);
+                
                 elements.checkoutSubtotal.value = formatCurrency(subtotal);
                 elements.checkoutDiscount.value = formatCurrency(discount);
                 elements.checkoutTotal.value = formatCurrency(total);
@@ -11334,7 +11407,9 @@ if ($settings_result) {
                 });
             }
             if (elements.bookToCartSearch) elements.bookToCartSearch.addEventListener('input', () => {
-                pagination.booksForCart.currentPage = 1;
+                renderBooksForCart(false);
+            });
+            if (elements.posCategoryFilter) elements.posCategoryFilter.addEventListener('change', () => {
                 renderBooksForCart(false);
             });
             if (elements.booksForCartPrevPage) elements.booksForCartPrevPage.addEventListener('click', () => {
