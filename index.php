@@ -1,6 +1,7 @@
 <?php
 ob_start();
 session_start();
+error_reporting(E_ALL & ~E_NOTICE & ~E_WARNING & ~E_DEPRECATED & ~E_STRICT);
 define('DB_SERVER', 'localhost');
 define('DB_USERNAME', 'root');
 define('DB_PASSWORD', 'root');
@@ -50,6 +51,14 @@ function ensure_runtime_schema($conn)
         $conn->query('UPDATE books SET wholesale_price = price WHERE wholesale_price IS NULL OR wholesale_price = 0');
         $conn->query("UPDATE books SET barcode = REPLACE(isbn, '-', '') WHERE (barcode IS NULL OR barcode = '') AND isbn IS NOT NULL AND isbn <> ''");
     }
+    $conn->query('CREATE TABLE IF NOT EXISTS public_news (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        content TEXT NOT NULL,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
     $conn->query("CREATE TABLE IF NOT EXISTS public_sale_links (
         id INT AUTO_INCREMENT PRIMARY KEY,
         token VARCHAR(120) NOT NULL UNIQUE,
@@ -189,7 +198,7 @@ if (isset($_GET['action'])) {
         $_SESSION['toast'] = ['type' => 'info', 'message' => 'You have been logged out.'];
         redirect('login');
     }
-    if (in_array($_GET['action'], ['get_public_books_json', 'get_online_order_status', 'get_book_by_barcode_json', 'get_sidebar_products_json', 'get_sale_details_json'])) {
+    if (in_array($_GET['action'], ['get_public_books_json', 'get_online_order_status', 'get_book_by_barcode_json', 'get_sidebar_products_json', 'get_sale_details_json', 'captcha', 'verify_captcha'])) {
     } elseif (!isLoggedIn()) {
         echo json_encode(['success' => false, 'message' => 'Unauthorized']);
         exit();
@@ -197,6 +206,44 @@ if (isset($_GET['action'])) {
     header('Content-Type: application/json');
     $action = $_GET['action'];
     switch ($action) {
+        case 'captcha':
+            $num1 = rand(1, 9);
+            $num2 = rand(1, 9);
+            $operators = ['+', '-', '*'];
+            $op = $operators[rand(0, 2)];
+            if ($op === '-') {
+                if ($num1 <= $num2) {
+                    $num1 = $num2 + rand(1, 5);
+                }
+                $_SESSION['captcha'] = (string) ($num1 - $num2);
+            } elseif ($op === '+') {
+                $_SESSION['captcha'] = (string) ($num1 + $num2);
+            } else {
+                $_SESSION['captcha'] = (string) ($num1 * $num2);
+            }
+            $code = "$num1 $op $num2 = ?";
+            $image = imagecreatetruecolor(120, 40);
+            $bg = imagecolorallocate($image, 245, 245, 245);
+            $fg = imagecolorallocate($image, 42, 157, 143);
+            $line_color = imagecolorallocate($image, 200, 200, 200);
+            imagefill($image, 0, 0, $bg);
+            for ($i = 0; $i < 8; $i++) {
+                imageline($image, rand(0, 120), rand(0, 40), rand(0, 120), rand(0, 40), $line_color);
+            }
+            for ($i = 0; $i < 100; $i++) {
+                imagesetpixel($image, rand(0, 120), rand(0, 40), $line_color);
+            }
+            imagestring($image, 5, 20, 12, $code, $fg);
+            header('Cache-Control: no-cache, must-revalidate');
+            header('Content-type: image/png');
+            imagepng($image);
+            imagedestroy($image);
+            exit();
+        case 'verify_captcha':
+            $input = $_GET['captcha'] ?? '';
+            $valid = (!empty($_SESSION['captcha']) && strtolower($input) === strtolower($_SESSION['captcha']));
+            echo json_encode(['success' => $valid]);
+            exit();
         case 'update_session_cart':
             $data = json_decode(file_get_contents('php://input'), true);
             if (isset($data['cart'])) {
@@ -1512,9 +1559,89 @@ if (isset($_POST['action'])) {
         redirect('login');
     }
     switch ($action) {
+        case 'changepassword':
+            if (!isLoggedIn()) {
+                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized'];
+                redirect('login');
+            }
+            $current = $_POST['currentpassword'] ?? '';
+            $new = $_POST['newpassword'] ?? '';
+            $confirm = $_POST['confirmpassword'] ?? '';
+
+            if (empty($current) || empty($new) || empty($confirm)) {
+                $message = 'All fields are required.';
+                $message_type = 'error';
+            } elseif ($new !== $confirm) {
+                $message = 'New passwords do not match.';
+                $message_type = 'error';
+            } elseif (strlen($new) < 6) {
+                $message = 'Password must be at least 6 characters long.';
+                $message_type = 'error';
+            } else {
+                if (isCustomer()) {
+                    $uid = $_SESSION['customerid'];
+                    $stmt = $conn->prepare('SELECT passwordhash FROM customers WHERE id = ?');
+                    $stmt->bind_param('i', $uid);
+                    $stmt->execute();
+                    $res = $stmt->get_result()->fetch_assoc();
+                    $stmt->close();
+
+                    if ($res && password_verify($current, $res['passwordhash'])) {
+                        $hash = password_hash($new, PASSWORD_BCRYPT);
+                        $stmt = $conn->prepare('UPDATE customers SET passwordhash = ? WHERE id = ?');
+                        $stmt->bind_param('si', $hash, $uid);
+                        if ($stmt->execute()) {
+                            $message = 'Password updated successfully.';
+                            $message_type = 'success';
+                        } else {
+                            $message = 'Failed to update password.';
+                            $message_type = 'error';
+                        }
+                    } else {
+                        $message = 'Incorrect current password.';
+                        $message_type = 'error';
+                    }
+                } else {
+                    $uid = $_SESSION['userid'];
+                    $stmt = $conn->prepare('SELECT passwordhash FROM users WHERE id = ?');
+                    $stmt->bind_param('i', $uid);
+                    $stmt->execute();
+                    $res = $stmt->get_result()->fetch_assoc();
+                    $stmt->close();
+
+                    if ($res && password_verify($current, $res['passwordhash'])) {
+                        $hash = password_hash($new, PASSWORD_BCRYPT);
+                        $stmt = $conn->prepare('UPDATE users SET passwordhash = ? WHERE id = ?');
+                        $stmt->bind_param('si', $hash, $uid);
+                        if ($stmt->execute()) {
+                            $message = 'Password updated successfully.';
+                            $message_type = 'success';
+                        } else {
+                            $message = 'Failed to update password.';
+                            $message_type = 'error';
+                        }
+                    } else {
+                        $message = 'Incorrect current password.';
+                        $message_type = 'error';
+                    }
+                }
+            }
+            $_SESSION['toast'] = ['type' => $message_type, 'message' => $message];
+            if (isCustomer()) {
+                redirect('customer-dashboard');
+            } else {
+                redirect('dashboard');
+            }
+            break;
+
         case 'login':
             $username = $_POST['username'] ?? '';
             $password = $_POST['password'] ?? '';
+            $captcha = $_POST['captcha'] ?? '';
+            if (empty($_SESSION['captcha']) || strtolower($captcha) !== strtolower($_SESSION['captcha'])) {
+                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Invalid CAPTCHA.'];
+                redirect('login');
+            }
             $stmt = $conn->prepare('SELECT u.id, u.username, u.password_hash, u.role_id, r.name as role FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.username = ?');
             $stmt->bind_param('s', $username);
             $stmt->execute();
@@ -1549,6 +1676,11 @@ if (isset($_POST['action'])) {
         case 'customer_login':
             $email = $_POST['email'] ?? '';
             $password = $_POST['password'] ?? '';
+            $captcha = $_POST['captcha'] ?? '';
+            if (empty($_SESSION['captcha']) || strtolower($captcha) !== strtolower($_SESSION['captcha'])) {
+                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Invalid CAPTCHA.'];
+                redirect('customer-login');
+            }
             $stmt = $conn->prepare('SELECT id, name, email, password_hash FROM customers WHERE email = ? AND is_active = 1');
             $stmt->bind_param('s', $email);
             $stmt->execute();
@@ -2681,6 +2813,61 @@ if (isset($_POST['action'])) {
                 $message = 'Expense ID not provided.';
             }
             break;
+        case 'save_news':
+            if (!isAdmin()) {
+                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
+                redirect('dashboard');
+            }
+            $news_id = $_POST['news_id'] ?? null;
+            $title = trim($_POST['title'] ?? '');
+            $content = trim($_POST['content'] ?? '');
+            $is_active = isset($_POST['is_active']) ? 1 : 0;
+            if ($title === '' || $content === '') {
+                $message = 'Title and content are required.';
+                break;
+            }
+            if ($news_id) {
+                $stmt = $conn->prepare('UPDATE public_news SET title=?, content=?, is_active=? WHERE id=?');
+                $stmt->bind_param('ssii', $title, $content, $is_active, $news_id);
+                if ($stmt->execute()) {
+                    $message_type = 'success';
+                    $message = 'News updated successfully.';
+                } else {
+                    $message = 'Failed to update news: ' . $stmt->error;
+                }
+                $stmt->close();
+            } else {
+                $stmt = $conn->prepare('INSERT INTO public_news (title, content, is_active) VALUES (?, ?, ?)');
+                $stmt->bind_param('ssi', $title, $content, $is_active);
+                if ($stmt->execute()) {
+                    $message_type = 'success';
+                    $message = 'News created successfully.';
+                } else {
+                    $message = 'Failed to create news: ' . $stmt->error;
+                }
+                $stmt->close();
+            }
+            break;
+        case 'delete_news':
+            if (!isAdmin()) {
+                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
+                redirect('dashboard');
+            }
+            $news_id = (int) ($_POST['news_id'] ?? 0);
+            if ($news_id <= 0) {
+                $message = 'News ID not provided.';
+                break;
+            }
+            $stmt = $conn->prepare('DELETE FROM public_news WHERE id = ?');
+            $stmt->bind_param('i', $news_id);
+            if ($stmt->execute()) {
+                $message_type = 'success';
+                $message = 'News deleted.';
+            } else {
+                $message = 'Failed to delete news: ' . $stmt->error;
+            }
+            $stmt->close();
+            break;
         case 'save_settings':
             if (!isAdmin()) {
                 $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
@@ -2688,6 +2875,7 @@ if (isset($_POST['action'])) {
             }
             $new_settings = [
                 'system_name' => $_POST['system_name'] ?? '',
+                'about_story' => $_POST['about_story'] ?? '',
                 'mission' => $_POST['mission'] ?? '',
                 'vision' => $_POST['vision'] ?? '',
                 'address' => $_POST['address'] ?? '',
@@ -3226,6 +3414,11 @@ if (isset($_POST['action'])) {
 if (isset($_POST['action']) && $_POST['action'] === 'login') {
     $username = $_POST['username'] ?? '';
     $password = $_POST['password'] ?? '';
+    $captcha = $_POST['captcha'] ?? '';
+    if (empty($_SESSION['captcha']) || strtolower($captcha) !== strtolower($_SESSION['captcha'])) {
+        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Invalid CAPTCHA.'];
+        redirect('login');
+    }
     $stmt = $conn->prepare('SELECT id, username, password_hash, role FROM users WHERE username = ?');
     $stmt->bind_param('s', $username);
     $stmt->execute();
@@ -3247,6 +3440,11 @@ if (isset($_POST['action']) && $_POST['action'] === 'login') {
 if (isset($_POST['action']) && $_POST['action'] === 'customer_login') {
     $email = $_POST['email'] ?? '';
     $password = $_POST['password'] ?? '';
+    $captcha = $_POST['captcha'] ?? '';
+    if (empty($_SESSION['captcha']) || strtolower($captcha) !== strtolower($_SESSION['captcha'])) {
+        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Invalid CAPTCHA.'];
+        redirect('customer-login');
+    }
     $stmt = $conn->prepare('SELECT id, name, email, password_hash FROM customers WHERE email = ? AND is_active = 1');
     $stmt->bind_param('s', $email);
     $stmt->execute();
@@ -3370,7 +3568,7 @@ if (isCustomer() && !in_array($page, array_merge($customer_only_pages, ['home', 
     $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
     redirect('customer-dashboard');
 }
-$app_pages = ['dashboard', 'books', 'users', 'customers', 'suppliers', 'purchase-orders', 'cart', 'sales-history', 'online-orders', 'promotions', 'expenses', 'reports', 'live-sales', 'settings', 'public-sale-links', 'print-barcodes', 'backup-restore'];
+$app_pages = ['dashboard', 'books', 'users', 'customers', 'suppliers', 'purchase-orders', 'cart', 'sales-history', 'online-orders', 'promotions', 'expenses', 'reports', 'live-sales', 'news', 'settings', 'public-sale-links', 'print-barcodes', 'backup-restore'];
 $authenticated_pages = array_merge($app_pages, $customer_only_pages);
 if (isLoggedIn() && !isCustomer() && in_array($page, $app_pages)) {
     if (!hasAccess($page)) {
@@ -3561,6 +3759,7 @@ if ($settings_result) {
             list-style: none;
             display: flex;
             gap: 30px;
+            flex-wrap: wrap;
         }
         .public-header nav ul li a {
             color: white;
@@ -5038,6 +5237,16 @@ if ($settings_result) {
                 margin-top: 10px;
             }
         }
+        .public-header {
+            height: auto !important;
+            flex-wrap: wrap !important;
+            overflow: visible !important;
+        }
+        .public-header nav,
+        .public-header nav ul {
+            overflow: visible !important;
+            white-space: normal !important;
+        }
     </style>
     <style id="minimalist-compact-overrides">
         :root {
@@ -5948,6 +6157,12 @@ if ($settings_result) {
 </head>
 <body>
     <?php if ($page === 'login' || $page === 'customer-login' || $page === 'customer-register'): ?>
+        <?php if (isset($_SESSION['toast'])) {
+            echo "<div id='initial-toast-data' style='display:none;' data-type='" . html($_SESSION['toast']['type']) . "' data-message='" . html($_SESSION['toast']['message']) . "'></div>";
+            unset($_SESSION['toast']);
+        } elseif (isset($_GET['toast_type']) && isset($_GET['toast_message'])) {
+            echo "<div id='initial-toast-data' style='display:none;' data-type='" . html($_GET['toast_type']) . "' data-message='" . html($_GET['toast_message']) . "'></div>";
+        } ?>
         <div id="login-container">
             <div class="login-card">
                 <?php if ($page === 'login'): ?>
@@ -5962,6 +6177,13 @@ if ($settings_result) {
                             <label for="password">Password</label>
                             <input type="password" id="password" name="password" required>
                         </div>
+                        <div class="form-group">
+                            <label for="captcha">CAPTCHA</label>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <img src="index.php?action=captcha" onclick="this.src='index.php?action=captcha&'+Math.random()" style="cursor: pointer; border: 1px solid var(--border-color); border-radius: 5px; height: 40px;" title="Click to refresh">
+                                <input type="text" id="captcha" name="captcha" required placeholder="Enter code" style="flex: 1;">
+                            </div>
+                        </div>
                         <button type="submit" class="btn btn-primary">Login</button>
                     </form>
                 <?php elseif ($page === 'customer-login'): ?>
@@ -5975,6 +6197,13 @@ if ($settings_result) {
                         <div class="form-group">
                             <label for="password">Password</label>
                             <input type="password" id="password" name="password" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="captcha-customer">CAPTCHA</label>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <img src="index.php?action=captcha" onclick="this.src='index.php?action=captcha&'+Math.random()" style="cursor: pointer; border: 1px solid var(--border-color); border-radius: 5px; height: 40px;" title="Click to refresh">
+                                <input type="text" id="captcha-customer" name="captcha" required placeholder="Enter code" style="flex: 1;">
+                            </div>
                         </div>
                         <button type="submit" class="btn btn-primary">Login</button>
                     </form>
@@ -6029,13 +6258,13 @@ if ($settings_result) {
                         <li><a href="index.php?page=contact" class="nav-link <?php echo $page === 'contact' ? 'active' : ''; ?>">Contact Us</a></li>
                     </ul>
                 </nav>
-                <div style="display: flex; gap: 15px; align-items: center;">
+                <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
                     <?php if (isCustomer()): ?>
                         <a href="index.php?page=customer-dashboard" class="login-btn">My Dashboard</a>
-                        <a href="index.php?action=logout" style="color: white; font-weight: 500;">Logout</a>
+                        <a href="index.php?action=logout" class="login-btn" style="background-color: var(--danger-color);">Logout</a>
                     <?php else: ?>
-                        <a href="index.php?page=customer-login" style="color: white; font-weight: 500;">Customer Login</a>
-                        <a href="index.php?page=login" class="login-btn">Admin/Staff Login</a>
+                        <a href="index.php?page=customer-login" class="login-btn">Customer Login</a>
+                        <a href="index.php?page=login" class="login-btn" style="background-color: var(--primary-dark-color);">Admin/Staff Login</a>
                     <?php endif; ?>
                 </div>
             </header>
@@ -6058,6 +6287,14 @@ if ($settings_result) {
                                 $latest_books[] = $row;
                             }
                         }
+                        $public_news_query = 'SELECT * FROM public_news WHERE is_active = 1 ORDER BY created_at DESC LIMIT 5';
+                        $public_news_result = $conn->query($public_news_query);
+                        $public_news = [];
+                        if ($public_news_result) {
+                            while ($row = $public_news_result->fetch_assoc()) {
+                                $public_news[] = $row;
+                            }
+                        }
                         ?>
                         <section id="public-home" class="page-content active">
                             <div class="hero-section">
@@ -6065,6 +6302,20 @@ if ($settings_result) {
                                 <p><?php echo html($public_settings['mission'] ?? 'Your one-stop destination for the latest and greatest products. Explore our vast collection and find what you need!'); ?></p>
                                 <a href="index.php?page=books-public" class="btn btn-primary">Browse Products <i class="fas fa-arrow-right"></i></a>
                             </div>
+                            <?php if (!empty($public_news)): ?>
+                            <div class="card" style="margin-bottom: 30px;">
+                                <div class="card-header"><i class="fas fa-bullhorn"></i> Latest News & Updates</div>
+                                <div style="display: flex; flex-direction: column; gap: 15px; margin-top: 15px;">
+                                    <?php foreach ($public_news as $news): ?>
+                                        <div style="padding: 15px; border: 1px solid var(--border-color); border-radius: 8px; background-color: var(--background-color);">
+                                            <h3 style="color: var(--primary-color); margin-bottom: 5px;"><?php echo html($news['title']); ?></h3>
+                                            <small style="color: var(--light-text-color); display: block; margin-bottom: 10px;"><?php echo format_date($news['created_at']); ?></small>
+                                            <p style="margin: 0; line-height: 1.6;"><?php echo nl2br(html($news['content'])); ?></p>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                            </div>
+                            <?php endif; ?>
                             <div class="card">
                                 <div class="card-header">New Arrivals</div>
                                 <div class="book-grid" id="latest-books-list">
@@ -6169,7 +6420,7 @@ if ($settings_result) {
                                 <div class="mv-card">
                                     <i class="fas fa-history"></i>
                                     <h3>Our Story</h3>
-                                    <p>Founded with a passion for quality and community, we strive to be more than just a store. We are a hub for knowledge, daily essentials, and connection.</p>
+                                    <p><?php echo nl2br(html($public_settings['about_story'] ?? 'Founded with a passion for quality and community, we strive to be more than just a store. We are a hub for knowledge, daily essentials, and connection.')); ?></p>
                                 </div>
                             </div>
                             <div class="card" style="padding: 40px;">
@@ -6213,9 +6464,12 @@ if ($settings_result) {
                     ?>
                         <section id="customer-dashboard" class="page-content active">
                             <div class="page-header" style="justify-content: space-between; width:100%;">
-                                <h1>Welcome, <?php echo html($_SESSION['customer_name']); ?>!</h1>
-                                <a href="index.php?action=logout" class="btn btn-danger">Logout</a>
-                            </div>
+        <h1>Welcome, <?php echo html($_SESSION['customername']); ?>!</h1>
+        <div style="display: flex; gap: 10px;">
+            <button class="btn btn-secondary" onclick="document.getElementById('change-password-modal').classList.add('active');">Change Password</button>
+            <a href="index.php?action=logout" class="btn btn-danger">Logout</a>
+        </div>
+    </div>
                             <div class="card">
                                 <div class="card-header">My Profile</div>
                                 <div id="customer-profile-details">
@@ -6575,6 +6829,13 @@ if ($settings_result) {
                                             <label>Message</label>
                                             <textarea class="form-control" rows="5" style="width:100%; padding:12px; border:1px solid var(--border-color); border-radius:5px;" required placeholder="How can we help you?"></textarea>
                                         </div>
+                                        <div class="form-group">
+                                            <label>CAPTCHA</label>
+                                            <div style="display: flex; gap: 10px; align-items: center;">
+                                                <img src="index.php?action=captcha" id="captcha-img-contact" onclick="this.src='index.php?action=captcha&'+Math.random()" style="cursor: pointer; border: 1px solid var(--border-color); border-radius: 5px; height: 44px;" title="Click to refresh">
+                                                <input type="text" class="form-control" id="contact-captcha" required placeholder="Enter code" style="flex: 1; padding:12px; border:1px solid var(--border-color); border-radius:5px;">
+                                            </div>
+                                        </div>
                                         <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px; font-size: 1.1em;">Send Message</button>
                                     </form>
                                 </div>
@@ -6624,6 +6885,7 @@ if ($settings_result) {
                         <?php if (hasAccess('expenses')): ?><li><a href="index.php?page=expenses" class="nav-link <?php echo $page === 'expenses' ? 'active' : ''; ?>"><i class="fas fa-money-bill-wave"></i> <span class="sidebar-label">Expenses</span></a></li><?php endif; ?>
                         <?php if (hasAccess('reports')): ?><li><a href="index.php?page=reports" class="nav-link <?php echo $page === 'reports' ? 'active' : ''; ?>"><i class="fas fa-chart-line"></i> <span class="sidebar-label">Reports</span></a></li><?php endif; ?>
                         <?php if (hasAccess('live-sales')): ?><li><a href="index.php?page=live-sales" class="nav-link <?php echo $page === 'live-sales' ? 'active' : ''; ?>"><i class="fas fa-satellite-dish"></i> <span class="sidebar-label">Live Sales</span></a></li><?php endif; ?>
+                        <?php if (hasAccess('news')): ?><li><a href="index.php?page=news" class="nav-link <?php echo $page === 'news' ? 'active' : ''; ?>"><i class="fas fa-bullhorn"></i> <span class="sidebar-label">News & Updates</span></a></li><?php endif; ?>
                         <?php if (hasAccess('settings')): ?><li><a href="index.php?page=settings" class="nav-link <?php echo $page === 'settings' ? 'active' : ''; ?>"><i class="fas fa-cog"></i> <span class="sidebar-label">Settings</span></a></li><?php endif; ?>
                         <?php if (hasAccess('public-sale-links')): ?><li><a href="index.php?page=public-sale-links" class="nav-link <?php echo $page === 'public-sale-links' ? 'active' : ''; ?>"><i class="fas fa-link"></i> <span class="sidebar-label">Secure Sale Links</span></a></li><?php endif; ?>
                         <?php if (hasAccess('print-barcodes')): ?><li><a href="index.php?page=print-barcodes" class="nav-link <?php echo $page === 'print-barcodes' ? 'active' : ''; ?>"><i class="fas fa-print"></i> <span class="sidebar-label">Print Barcodes</span></a></li><?php endif; ?>
@@ -6631,7 +6893,8 @@ if ($settings_result) {
                     </ul>
                 </nav>
                 <div class="user-info">
-                    Logged in as <span><?php echo html($_SESSION['username']); ?> (<?php echo html($_SESSION['user_role']); ?>)</span><br>
+                    Logged in as <span><?php echo html($_SESSION['username']); ?> (<?php echo html($_SESSION['userrole']); ?>)</span><br>
+                    <a href="#" onclick="document.getElementById('change-password-modal').classList.add('active'); return false;">Change Password</a> | 
                     <a href="index.php?action=logout">Logout</a>
                 </div>
                 <div class="dark-mode-toggle">
@@ -7563,6 +7826,67 @@ if ($settings_result) {
                         </section>
                     <?php
                     break;
+                case 'news':
+                    if (!isAdmin()) {
+                        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
+                        redirect('dashboard');
+                    }
+                    $news_list = [];
+                    $news_query = $conn->query('SELECT * FROM public_news ORDER BY created_at DESC');
+                    if ($news_query) {
+                        while ($row = $news_query->fetch_assoc()) {
+                            $news_list[] = $row;
+                        }
+                    }
+                    ?>
+                        <section id="news" class="page-content <?php echo $page === 'news' ? 'active' : ''; ?>">
+                            <div class="page-header">
+                                <h1>Public News & Updates</h1>
+                                <button class="btn btn-primary" id="add-news-btn"><i class="fas fa-plus"></i> Add News</button>
+                            </div>
+                            <div class="card">
+                                <div class="card-header">Manage Public Announcements</div>
+                                <div class="table-responsive">
+                                    <table class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Date</th>
+                                                <th>Title</th>
+                                                <th>Status</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php if (!empty($news_list)): ?>
+                                                <?php foreach ($news_list as $n): ?>
+                                                    <tr>
+                                                        <td><?php echo format_date($n['created_at']); ?></td>
+                                                        <td><strong><?php echo html($n['title']); ?></strong></td>
+                                                        <td><?php echo $n['is_active'] ? '<span class="status-pill success">Active</span>' : '<span class="status-pill muted">Inactive</span>'; ?></td>
+                                                        <td class="actions">
+                                                            <button type="button" class="btn btn-primary btn-sm edit-news-btn"
+                                                                data-id="<?php echo html($n['id']); ?>"
+                                                                data-title="<?php echo html($n['title']); ?>"
+                                                                data-content="<?php echo html($n['content']); ?>"
+                                                                data-active="<?php echo html($n['is_active']); ?>"><i class="fas fa-edit"></i> Edit</button>
+                                                            <form method="POST" action="index.php?page=news" style="display:inline;" onsubmit="return confirm('Delete this news?');">
+                                                                <input type="hidden" name="action" value="delete_news">
+                                                                <input type="hidden" name="news_id" value="<?php echo html($n['id']); ?>">
+                                                                <button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-trash"></i> Delete</button>
+                                                            </form>
+                                                        </td>
+                                                    </tr>
+                                                <?php endforeach; ?>
+                                            <?php else: ?>
+                                                <tr><td colspan="4">No news items found.</td></tr>
+                                            <?php endif; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </section>
+                    <?php
+                    break;
                 case 'settings':
                     if (!isAdmin()) {
                         $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
@@ -7596,6 +7920,10 @@ if ($settings_result) {
                                     <div class="form-group">
                                         <label for="vision">Vision Statement</label>
                                         <textarea id="vision" name="vision" rows="3"><?php echo html($current_settings['vision'] ?? ''); ?></textarea>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="about-story">Our Story (About Page text)</label>
+                                        <textarea id="about-story" name="about_story" rows="4"><?php echo html($current_settings['about_story'] ?? 'Founded with a passion for quality and community, we strive to be more than just a store. We are a hub for knowledge, daily essentials, and connection.'); ?></textarea>
                                     </div>
                                     <div class="form-group">
                                         <label for="address">Address</label>
@@ -7972,7 +8300,35 @@ if ($settings_result) {
                 </form>
             </div>
         </div>
-        <div id="user-modal" class="modal-overlay">
+        <div id="change-password-modal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 400px;">
+        <div class="modal-header">
+            <h3>Change Password</h3>
+            <button type="button" class="modal-close" onclick="document.getElementById('change-password-modal').classList.remove('active')"><i class="fas fa-times"></i></button>
+        </div>
+        <form method="POST" action="index.php">
+            <input type="hidden" name="action" value="changepassword">
+            <div class="form-group">
+                <label>Current Password</label>
+                <input type="password" name="currentpassword" required>
+            </div>
+            <div class="form-group">
+                <label>New Password</label>
+                <input type="password" name="newpassword" required>
+            </div>
+            <div class="form-group">
+                <label>Confirm New Password</label>
+                <input type="password" name="confirmpassword" required>
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="document.getElementById('change-password-modal').classList.remove('active')">Cancel</button>
+                <button type="submit" class="btn btn-primary">Update Password</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="user-modal" class="modal-overlay">
             <div class="modal-content">
                 <div class="modal-header">
                     <h3 id="user-modal-title">Add New User</h3>
@@ -8319,6 +8675,35 @@ if ($settings_result) {
                     <div class="form-actions">
                         <button type="button" class="btn btn-secondary modal-close">Cancel</button>
                         <button type="submit" class="btn btn-primary">Save Secure Link</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <div id="news-modal" class="modal-overlay">
+            <div class="modal-content" style="max-width: 600px;">
+                <div class="modal-header">
+                    <h3 id="news-modal-title">Add News</h3>
+                    <button type="button" class="modal-close"><i class="fas fa-times"></i></button>
+                </div>
+                <form action="index.php?page=news" method="POST">
+                    <input type="hidden" name="action" value="save_news">
+                    <input type="hidden" name="news_id" id="news-id">
+                    <div class="form-group">
+                        <label>Title</label>
+                        <input type="text" name="title" id="news-title" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Content</label>
+                        <textarea name="content" id="news-content" rows="6" required></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label style="display:flex; align-items:center; gap:8px;">
+                            <input type="checkbox" name="is_active" id="news-active" checked> Active
+                        </label>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary modal-close">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save News</button>
                     </div>
                 </form>
             </div>
@@ -11313,12 +11698,30 @@ unset($_SESSION['last_sale_id']); ?>";
                 observer.observe(document.body, { childList: true, subtree: true });
                 var contactForm = document.getElementById('contact-message-form');
                 if (contactForm) {
-                    contactForm.addEventListener('submit', function (event) {
+                    contactForm.addEventListener('submit', async function (event) {
                         event.preventDefault();
+                        const captchaInput = document.getElementById('contact-captcha');
+                        if (captchaInput) {
+                            try {
+                                const res = await fetch('index.php?action=verify_captcha&captcha=' + encodeURIComponent(captchaInput.value));
+                                const data = await res.json();
+                                if (!data.success) {
+                                    if (typeof showToast === 'function') showToast('Invalid CAPTCHA. Please try again.', 'error');
+                                    document.getElementById('captcha-img-contact').src = 'index.php?action=captcha&' + Math.random();
+                                    return;
+                                }
+                            } catch (e) {
+                                if (typeof showToast === 'function') showToast('Error verifying CAPTCHA.', 'error');
+                                return;
+                            }
+                        }
                         if (typeof showToast === 'function') {
                             showToast('Thank you for your message! We will get back to you soon.', 'success');
                         }
                         contactForm.reset();
+                        if (document.getElementById('captcha-img-contact')) {
+                            document.getElementById('captcha-img-contact').src = 'index.php?action=captcha&' + Math.random();
+                        }
                     });
                 }
                 document.addEventListener('keydown', function (event) {
@@ -11729,6 +12132,29 @@ unset($_SESSION['last_sale_id']); ?>";
                 input.addEventListener('input', load);
                 load();
             }
+            function initNewsManager() {
+                const addBtn = document.getElementById('add-news-btn');
+                const modal = document.getElementById('news-modal');
+                if (!addBtn || !modal) return;
+                addBtn.addEventListener('click', function () {
+                    document.getElementById('news-id').value = '';
+                    document.getElementById('news-title').value = '';
+                    document.getElementById('news-content').value = '';
+                    document.getElementById('news-active').checked = true;
+                    document.getElementById('news-modal-title').textContent = 'Add News';
+                    modal.classList.add('active');
+                });
+                qsa('.edit-news-btn').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        document.getElementById('news-id').value = btn.dataset.id;
+                        document.getElementById('news-title').value = btn.dataset.title;
+                        document.getElementById('news-content').value = btn.dataset.content;
+                        document.getElementById('news-active').checked = btn.dataset.active === '1';
+                        document.getElementById('news-modal-title').textContent = 'Edit News';
+                        modal.classList.add('active');
+                    });
+                });
+            }
             function initSecureLinkManager() {
                 const addBtn = document.getElementById('add-public-sale-link-btn');
                 const modal = document.getElementById('public-sale-link-modal');
@@ -11948,6 +12374,7 @@ unset($_SESSION['last_sale_id']); ?>";
                 if (currentPage === 'books' && typeof window.renderBooks === 'function') { window.renderBooks(); }
                 bindPosAndPoBarcodeTools();
                 initSidebarProductNavigator();
+                initNewsManager();
                 initSecureLinkManager();
                 initPublicSalePage();
             });
