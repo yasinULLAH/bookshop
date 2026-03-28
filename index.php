@@ -1196,7 +1196,6 @@ if (isset($_GET['action'])) {
             $stmt->execute();
             $pending_orders = $stmt->get_result()->fetch_row()[0];
             $stmt->close();
-
             $total_products = $conn->query('SELECT COUNT(*) FROM books')->fetch_row()[0] ?? 0;
             $total_customers = $conn->query('SELECT COUNT(*) FROM customers WHERE is_active = 1')->fetch_row()[0] ?? 0;
             $total_suppliers = $conn->query('SELECT COUNT(*) FROM suppliers')->fetch_row()[0] ?? 0;
@@ -1205,7 +1204,6 @@ if (isset($_GET['action'])) {
             $total_expenses = $conn->query('SELECT SUM(amount) FROM expenses')->fetch_row()[0] ?? 0;
             $active_promos = $conn->query('SELECT COUNT(*) FROM promotions WHERE start_date <= CURDATE() AND (end_date IS NULL OR end_date >= CURDATE())')->fetch_row()[0] ?? 0;
             $stock_value = $conn->query('SELECT SUM(stock * COALESCE(purchase_price, price)) FROM books')->fetch_row()[0] ?? 0;
-
             $weekly_labels = [];
             $weekly_data = [];
             for ($i = 6; $i >= 0; $i--) {
@@ -1225,7 +1223,6 @@ if (isset($_GET['action'])) {
             $stmt->execute();
             $top_products = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
             $stmt->close();
-
             $monthly_labels = [];
             $monthly_sales = [];
             $monthly_expenses = [];
@@ -1245,9 +1242,7 @@ if (isset($_GET['action'])) {
                 $monthly_expenses[] = (float) ($e_stmt->get_result()->fetch_row()[0] ?? 0);
                 $e_stmt->close();
             }
-
             $order_stats = $conn->query('SELECT status, COUNT(*) as cnt FROM online_orders GROUP BY status')->fetch_all(MYSQLI_ASSOC);
-
             echo json_encode([
                 'success' => true,
                 'today_rev' => (float) $today_stats['rev'],
@@ -1474,7 +1469,6 @@ if (isset($_GET['action'])) {
                     throw new Exception('Product not found.');
                 if ($book_data['stock'] < $qty)
                     throw new Exception('Not enough stock. Available: ' . $book_data['stock']);
-
                 $user_id = $_SESSION['user_id'];
                 $subtotal = $book_data['price'] * $qty;
                 $stmt_sale = $conn->prepare('INSERT INTO sales (customer_id, user_id, subtotal, discount, total) VALUES (NULL, ?, ?, 0, ?)');
@@ -1482,17 +1476,14 @@ if (isset($_GET['action'])) {
                 $stmt_sale->execute();
                 $sale_id = $conn->insert_id;
                 $stmt_sale->close();
-
                 $stmt_sale_item = $conn->prepare('INSERT INTO sale_items (sale_id, book_id, quantity, price_per_unit, discount_per_unit) VALUES (?, ?, ?, ?, 0)');
                 $stmt_sale_item->bind_param('iiid', $sale_id, $book_id, $qty, $book_data['price']);
                 $stmt_sale_item->execute();
                 $stmt_sale_item->close();
-
                 $stmt_update_stock = $conn->prepare('UPDATE books SET stock = stock - ? WHERE id = ?');
                 $stmt_update_stock->bind_param('ii', $qty, $book_id);
                 $stmt_update_stock->execute();
                 $stmt_update_stock->close();
-
                 $conn->commit();
                 echo json_encode(['success' => true, 'message' => 'Quick sale completed for ' . $qty . 'x ' . html($book_data['name']), 'sale_id' => $sale_id]);
             } catch (Exception $e) {
@@ -1530,7 +1521,6 @@ if (isset($_POST['action'])) {
                 $_SESSION['username'] = $user['username'];
                 $_SESSION['user_role'] = $user['role'];
                 $_SESSION['role_id'] = $user['role_id'];
-
                 $perm_stmt = $conn->prepare('SELECT page_key FROM role_page_permissions WHERE role_id = ?');
                 $perm_stmt->bind_param('i', $user['role_id']);
                 $perm_stmt->execute();
@@ -2258,12 +2248,9 @@ if (isset($_POST['action'])) {
                     }
                     $subtotal += $book_data['price'] * $cart_item['quantity'];
                     $cart_item['price_per_unit'] = $book_data['price'];
-
-                    // Apply manual POS discount if set
                     $manual_disc = isset($cart_item['custom_discount']) ? (float) $cart_item['custom_discount'] : 0;
                     $cart_item['discount_per_unit'] = min($manual_disc, $book_data['price']);
                     $cart_item['category'] = $book_data['category'];
-
                     $total_discount += ($cart_item['discount_per_unit'] * $cart_item['quantity']);
                 }
                 unset($cart_item);
@@ -3400,7 +3387,6 @@ if ($settings_result) {
 ?>
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -3412,7 +3398,6 @@ if ($settings_result) {
     <style>
         @import url("https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css");
         @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
-
         :root {
             --primary-color: #2a9d8f;
             --primary-dark-color: #218579;
@@ -3430,7 +3415,6 @@ if ($settings_result) {
             --info-color: #17a2b8;
             --disabled-color: #cccccc;
         }
-
         [data-theme='dark'] {
             --primary-color: #55b7a8;
             --primary-dark-color: #4a9d91;
@@ -3448,13 +3432,11 @@ if ($settings_result) {
             --info-color: #17a2b8;
             --disabled-color: #555555;
         }
-
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
         }
-
         body {
             font-family: 'Poppins', sans-serif;
             background-color: var(--background-color);
@@ -3465,7 +3447,6 @@ if ($settings_result) {
             flex-direction: column;
             transition: background-color 0.3s, color 0.3s;
         }
-
         #app-container,
         #public-site-container,
         #login-container {
@@ -3479,7 +3460,6 @@ if ($settings_result) {
             border-radius: 8px;
             overflow: hidden;
         }
-
         #public-site-container {
             flex-direction: column;
             box-shadow: none;
@@ -3487,7 +3467,6 @@ if ($settings_result) {
             max-width: none;
             background-color: var(--background-color);
         }
-
         #login-container {
             box-shadow: none;
             border-radius: 0;
@@ -3496,7 +3475,6 @@ if ($settings_result) {
             justify-content: center;
             align-items: center;
         }
-
         .global-search-bar {
             background-color: var(--surface-color);
             padding: 10px 20px;
@@ -3509,7 +3487,6 @@ if ($settings_result) {
             z-index: 50;
             box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
         }
-
         .global-search-bar input {
             flex-grow: 1;
             padding: 8px 12px;
@@ -3519,7 +3496,6 @@ if ($settings_result) {
             color: var(--text-color);
             font-size: 0.95em;
         }
-
         .global-search-results {
             position: absolute;
             top: 100%;
@@ -3535,26 +3511,21 @@ if ($settings_result) {
             z-index: 100;
             display: none;
         }
-
         .global-search-results.active {
             display: block;
         }
-
         .global-search-results div {
             padding: 10px 15px;
             cursor: pointer;
             transition: background-color 0.2s;
             border-bottom: 1px solid var(--border-color);
         }
-
         .global-search-results div:last-child {
             border-bottom: none;
         }
-
         .global-search-results div:hover {
             background-color: var(--background-color);
         }
-
         .global-search-results .type-label {
             font-size: 0.8em;
             color: var(--light-text-color);
@@ -3564,7 +3535,6 @@ if ($settings_result) {
             color: white;
             border-radius: 3px;
         }
-
         .public-header {
             background-color: var(--primary-color);
             color: white;
@@ -3575,20 +3545,17 @@ if ($settings_result) {
             box-shadow: 0 2px 5px var(--shadow-color);
             flex-wrap: wrap;
         }
-
         .public-header .logo {
             font-size: 2.2em;
             font-weight: bold;
             color: white;
             text-decoration: none;
         }
-
         .public-header nav ul {
             list-style: none;
             display: flex;
             gap: 30px;
         }
-
         .public-header nav ul li a {
             color: white;
             text-decoration: none;
@@ -3597,7 +3564,6 @@ if ($settings_result) {
             padding: 5px 0;
             position: relative;
         }
-
         .public-header nav ul li a::after {
             content: '';
             position: absolute;
@@ -3608,12 +3574,10 @@ if ($settings_result) {
             background-color: var(--accent-color);
             transition: width 0.3s ease;
         }
-
         .public-header nav ul li a:hover::after,
         .public-header nav ul li a.active::after {
             width: 100%;
         }
-
         .public-header .login-btn {
             background-color: var(--accent-color);
             color: white;
@@ -3623,11 +3587,9 @@ if ($settings_result) {
             font-weight: 600;
             transition: background-color 0.3s ease;
         }
-
         .public-header .login-btn:hover {
             background-color: #e09255;
         }
-
         .public-content {
             flex-grow: 1;
             padding: 40px 20px;
@@ -3638,7 +3600,6 @@ if ($settings_result) {
             max-width: 1200px;
             width: 100%;
         }
-
         .hero-section {
             text-align: center;
             padding: 80px 20px;
@@ -3648,14 +3609,12 @@ if ($settings_result) {
             margin-bottom: 30px;
             box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
         }
-
         .hero-section h1 {
             font-size: 4em;
             margin-bottom: 20px;
             font-weight: 700;
             text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
         }
-
         .hero-section p {
             font-size: 1.4em;
             margin-bottom: 40px;
@@ -3664,21 +3623,18 @@ if ($settings_result) {
             margin-right: auto;
             line-height: 1.5;
         }
-
         .hero-section .btn-primary {
             padding: 18px 35px;
             font-size: 1.3em;
             border-radius: 50px;
             box-shadow: 0 6px 15px rgba(0, 0, 0, 0.2);
         }
-
         .book-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
             gap: 25px;
             margin-top: 30px;
         }
-
         .book-card {
             background-color: var(--surface-color);
             border-radius: 10px;
@@ -3692,12 +3648,10 @@ if ($settings_result) {
             overflow: hidden;
             border: 1px solid var(--border-color);
         }
-
         .book-card:hover {
             transform: translateY(-8px);
             box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
         }
-
         .book-card img {
             max-width: 100%;
             height: 200px;
@@ -3707,7 +3661,6 @@ if ($settings_result) {
             background-color: var(--background-color);
             padding: 5px;
         }
-
         .book-card h3 {
             font-size: 1.3em;
             margin-bottom: 5px;
@@ -3717,13 +3670,11 @@ if ($settings_result) {
             white-space: nowrap;
             overflow: hidden;
         }
-
         .book-card p {
             font-size: 0.95em;
             color: var(--light-text-color);
             margin-bottom: 10px;
         }
-
         .book-card .price {
             font-size: 1.2em;
             font-weight: bold;
@@ -3731,24 +3682,20 @@ if ($settings_result) {
             margin-top: auto;
             margin-bottom: 10px;
         }
-
         .book-card .stock-info {
             font-size: 0.85em;
             color: var(--light-text-color);
             padding-bottom: 10px;
         }
-
         .book-card .stock-info.low {
             color: var(--warning-color);
             font-weight: bold;
         }
-
         .book-card .stock-info.out {
             color: var(--danger-color);
             font-weight: bold;
             text-decoration: line-through;
         }
-
         .public-product-actions {
             display: flex;
             gap: 10px;
@@ -3756,13 +3703,11 @@ if ($settings_result) {
             flex-wrap: wrap;
             justify-content: center;
         }
-
         .public-product-actions .btn {
             flex-grow: 1;
             padding: 8px 12px;
             font-size: 0.9em;
         }
-
         .public-footer {
             background-color: var(--surface-color);
             color: var(--light-text-color);
@@ -3772,12 +3717,10 @@ if ($settings_result) {
             box-shadow: 0 -2px 5px var(--shadow-color);
             margin-top: 40px;
         }
-
         .public-footer p {
             margin: 0;
             font-size: 0.9em;
         }
-
         aside.sidebar {
             width: 280px;
             background-color: var(--surface-color);
@@ -3788,7 +3731,6 @@ if ($settings_result) {
             border-right: 1px solid var(--border-color);
             transition: background-color 0.3s, border-color 0.3s;
         }
-
         aside.sidebar h2 {
             color: var(--primary-color);
             text-align: center;
@@ -3797,16 +3739,13 @@ if ($settings_result) {
             border-bottom: 2px solid var(--primary-color);
             padding-bottom: 10px;
         }
-
         aside.sidebar nav ul {
             list-style: none;
             flex-grow: 1;
         }
-
         aside.sidebar nav ul li {
             margin-bottom: 10px;
         }
-
         aside.sidebar nav ul li a {
             display: flex;
             align-items: center;
@@ -3817,23 +3756,19 @@ if ($settings_result) {
             transition: background-color 0.3s, color 0.3s;
             font-weight: 500;
         }
-
         aside.sidebar nav ul li a:hover,
         aside.sidebar nav ul li a.active {
             background-color: var(--primary-color);
             color: white;
             box-shadow: 0 4px 8px var(--shadow-color);
         }
-
         aside.sidebar nav ul li a.active {
             font-weight: 600;
         }
-
         aside.sidebar nav ul li a i {
             margin-right: 10px;
             font-size: 1.2em;
         }
-
         .user-info {
             padding: 10px 15px;
             margin-top: auto;
@@ -3842,23 +3777,19 @@ if ($settings_result) {
             color: var(--light-text-color);
             text-align: center;
         }
-
         .user-info span {
             font-weight: bold;
             color: var(--text-color);
         }
-
         .user-info a {
             color: var(--danger-color);
             text-decoration: none;
             font-weight: bold;
             margin-left: 5px;
         }
-
         .user-info a:hover {
             text-decoration: underline;
         }
-
         .dark-mode-toggle {
             display: flex;
             align-items: center;
@@ -3869,25 +3800,21 @@ if ($settings_result) {
             border-radius: 6px;
             border: 1px solid var(--border-color);
         }
-
         .dark-mode-toggle label {
             font-weight: 500;
             color: var(--text-color);
         }
-
         .switch {
             position: relative;
             display: inline-block;
             width: 40px;
             height: 24px;
         }
-
         .switch input {
             opacity: 0;
             width: 0;
             height: 0;
         }
-
         .slider {
             position: absolute;
             cursor: pointer;
@@ -3899,7 +3826,6 @@ if ($settings_result) {
             transition: .4s;
             border-radius: 24px;
         }
-
         .slider:before {
             position: absolute;
             content: "";
@@ -3911,30 +3837,24 @@ if ($settings_result) {
             transition: .4s;
             border-radius: 50%;
         }
-
         input:checked+.slider {
             background-color: var(--primary-color);
         }
-
         input:focus+.slider {
             box-shadow: 0 0 1px var(--primary-color);
         }
-
         input:checked+.slider:before {
             transform: translateX(16px);
         }
-
         main.content {
             flex-grow: 1;
             padding: 20px;
             background-color: var(--background-color);
             overflow-y: auto;
         }
-
         .page-content:not(.active) {
             display: none;
         }
-
         .page-header {
             display: flex;
             justify-content: space-between;
@@ -3943,12 +3863,10 @@ if ($settings_result) {
             padding-bottom: 15px;
             border-bottom: 1px solid var(--border-color);
         }
-
         .page-header h1 {
             font-size: 2em;
             color: var(--primary-color);
         }
-
         .btn {
             padding: 10px 18px;
             border: none;
@@ -3962,7 +3880,6 @@ if ($settings_result) {
             gap: 8px;
             text-decoration: none;
         }
-
         .btn:disabled {
             background-color: var(--disabled-color);
             cursor: not-allowed;
@@ -3970,63 +3887,52 @@ if ($settings_result) {
             transform: none;
             box-shadow: none;
         }
-
         .btn-primary {
             background-color: var(--primary-color);
             color: white;
         }
-
         .btn-primary:hover:not(:disabled) {
             background-color: var(--primary-dark-color);
             transform: translateY(-2px);
             box-shadow: 0 4px 8px var(--shadow-color);
         }
-
         .btn-secondary {
             background-color: var(--surface-color);
             color: var(--text-color);
             border: 1px solid var(--border-color);
         }
-
         .btn-secondary:hover:not(:disabled) {
             background-color: var(--background-color);
             transform: translateY(-2px);
             box-shadow: 0 4px 8px var(--shadow-color);
         }
-
         .btn-danger {
             background-color: var(--danger-color);
             color: white;
         }
-
         .btn-danger:hover:not(:disabled) {
             background-color: #d15034;
             transform: translateY(-2px);
             box-shadow: 0 4px 8px var(--shadow-color);
         }
-
         .btn-success {
             background-color: var(--success-color);
             color: white;
         }
-
         .btn-success:hover:not(:disabled) {
             background-color: #218838;
             transform: translateY(-2px);
             box-shadow: 0 4px 8px var(--shadow-color);
         }
-
         .btn-info {
             background-color: var(--info-color);
             color: white;
         }
-
         .btn-info:hover:not(:disabled) {
             background-color: #117a8b;
             transform: translateY(-2px);
             box-shadow: 0 4px 8px var(--shadow-color);
         }
-
         .card {
             background-color: var(--surface-color);
             border-radius: 8px;
@@ -4035,7 +3941,6 @@ if ($settings_result) {
             margin-bottom: 20px;
             transition: background-color 0.3s, border-color 0.3s;
         }
-
         .card-header {
             font-size: 1.3em;
             font-weight: 600;
@@ -4044,14 +3949,12 @@ if ($settings_result) {
             border-bottom: 1px solid var(--border-color);
             padding-bottom: 10px;
         }
-
         .dashboard-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
             gap: 20px;
             margin-bottom: 20px;
         }
-
         .dashboard-card {
             text-align: center;
             padding: 25px;
@@ -4064,27 +3967,22 @@ if ($settings_result) {
             box-shadow: 0 2px 10px var(--shadow-color);
             transition: transform 0.3s ease;
         }
-
         .dashboard-card:hover {
             transform: translateY(-5px);
         }
-
         .dashboard-card h3 {
             font-size: 1.2em;
             color: var(--light-text-color);
             margin-bottom: 10px;
         }
-
         .dashboard-card p {
             font-size: 2.5em;
             font-weight: bold;
             color: var(--primary-color);
         }
-
         .dashboard-card p.danger {
             color: var(--danger-color);
         }
-
         .data-table {
             width: 100%;
             border-collapse: collapse;
@@ -4094,69 +3992,56 @@ if ($settings_result) {
             overflow: hidden;
             box-shadow: 0 2px 10px var(--shadow-color);
         }
-
         .data-table thead {
             background-color: var(--primary-color);
             color: white;
         }
-
         .data-table th,
         .data-table td {
             padding: 12px 15px;
             text-align: left;
             border-bottom: 1px solid var(--border-color);
         }
-
         .data-table tbody tr:hover {
             background-color: var(--background-color);
         }
-
         .data-table tbody tr:last-child td {
             border-bottom: none;
         }
-
         .data-table .actions {
             display: flex;
             gap: 5px;
             justify-content: center;
         }
-
         .data-table .actions .btn {
             padding: 6px 10px;
             font-size: 0.85em;
         }
-
         .low-stock {
             background-color: #fff3cd !important;
             color: var(--warning-color) !important;
         }
-
         [data-theme='dark'] .low-stock {
             background-color: #6a4000 !important;
             color: #ffd180 !important;
         }
-
         .inactive-customer {
             background-color: #fce8e6 !important;
             color: var(--danger-color) !important;
         }
-
         [data-theme='dark'] .inactive-customer {
             background-color: #5c3029 !important;
             color: #ff998c !important;
         }
-
         .form-group {
             margin-bottom: 15px;
         }
-
         .form-group label {
             display: block;
             margin-bottom: 5px;
             font-weight: 500;
             color: var(--text-color);
         }
-
         .form-group input[type="text"],
         .form-group input[type="number"],
         .form-group input[type="email"],
@@ -4176,21 +4061,18 @@ if ($settings_result) {
             font-size: 1em;
             transition: border-color 0.3s;
         }
-
         .form-group input:focus,
         .form-group textarea:focus,
         .form-group select:focus {
             outline: none;
             border-color: var(--primary-color);
         }
-
         .form-actions {
             display: flex;
             justify-content: flex-end;
             gap: 10px;
             margin-top: 20px;
         }
-
         .modal-overlay {
             position: fixed;
             top: 0;
@@ -4206,12 +4088,10 @@ if ($settings_result) {
             visibility: hidden;
             transition: opacity 0.3s ease, visibility 0.3s ease;
         }
-
         .modal-overlay.active {
             opacity: 1;
             visibility: visible;
         }
-
         .modal-content {
             background-color: var(--surface-color);
             padding: 30px;
@@ -4224,11 +4104,9 @@ if ($settings_result) {
             max-height: 90vh;
             overflow-y: auto;
         }
-
         .modal-overlay.active .modal-content {
             transform: translateY(0);
         }
-
         .modal-header {
             display: flex;
             justify-content: space-between;
@@ -4237,12 +4115,10 @@ if ($settings_result) {
             padding-bottom: 10px;
             border-bottom: 1px solid var(--border-color);
         }
-
         .modal-header h3 {
             color: var(--primary-color);
             font-size: 1.5em;
         }
-
         .modal-close {
             background: none;
             border: none;
@@ -4251,11 +4127,9 @@ if ($settings_result) {
             color: var(--light-text-color);
             transition: color 0.3s;
         }
-
         .modal-close:hover {
             color: var(--text-color);
         }
-
         #toast-container {
             position: fixed;
             top: 20px;
@@ -4264,7 +4138,6 @@ if ($settings_result) {
             flex-direction: column;
             gap: 10px;
         }
-
         .toast {
             background-color: var(--surface-color);
             color: var(--text-color);
@@ -4278,32 +4151,25 @@ if ($settings_result) {
             gap: 10px;
             min-width: 250px;
         }
-
         .toast.show {
             opacity: 1;
             <?php echo !isLoggedIn() ? 'transform: translateY(0);' : 'transform: translateX(0);'; ?>
         }
-
         .toast.success {
             border-left: 5px solid var(--success-color);
         }
-
         .toast.error {
             border-left: 5px solid var(--danger-color);
         }
-
         .toast.info {
             border-left: 5px solid var(--info-color);
         }
-
         .toast.warning {
             border-left: 5px solid var(--warning-color);
         }
-
         .toast i {
             font-size: 1.2em;
         }
-
         .search-sort-controls {
             display: flex;
             gap: 15px;
@@ -4311,34 +4177,28 @@ if ($settings_result) {
             flex-wrap: wrap;
             align-items: center;
         }
-
         .search-sort-controls .form-group {
             flex: 1;
             min-width: 180px;
             margin-bottom: 0;
         }
-
         .search-sort-controls .form-group label {
             display: none;
         }
-
         .search-sort-controls .form-group input,
         .search-sort-controls .form-group select {
             width: 100%;
         }
-
         #cart-items-table .quantity-controls {
             display: flex;
             align-items: center;
             gap: 5px;
         }
-
         #cart-items-table .quantity-controls input {
             width: 60px;
             text-align: center;
             padding: 5px;
         }
-
         #cart-summary {
             margin-top: 20px;
             padding-top: 15px;
@@ -4349,41 +4209,34 @@ if ($settings_result) {
             font-size: 1.2em;
             font-weight: 600;
         }
-
         #cart-actions {
             display: flex;
             justify-content: flex-end;
             gap: 10px;
             margin-top: 20px;
         }
-
         .report-filters {
             display: flex;
             gap: 15px;
             margin-bottom: 20px;
             flex-wrap: wrap;
         }
-
         .report-filters .form-group {
             flex: 1;
             min-width: 150px;
         }
-
         .report-controls {
             display: flex;
             gap: 10px;
             margin-top: 20px;
         }
-
         .flex-group {
             display: flex;
             gap: 15px;
         }
-
         .flex-group .form-group {
             flex: 1;
         }
-
         .img-preview {
             width: 100px;
             height: 100px;
@@ -4396,13 +4249,11 @@ if ($settings_result) {
             background-color: var(--background-color);
             margin-top: 10px;
         }
-
         .img-preview img {
             max-width: 100%;
             max-height: 100%;
             object-fit: contain;
         }
-
         .pagination {
             display: flex;
             justify-content: center;
@@ -4410,7 +4261,6 @@ if ($settings_result) {
             margin-top: 20px;
             gap: 10px;
         }
-
         .pagination button {
             background-color: var(--primary-color);
             color: white;
@@ -4420,33 +4270,27 @@ if ($settings_result) {
             cursor: pointer;
             transition: background-color 0.3s;
         }
-
         .pagination button:hover:not(:disabled) {
             background-color: var(--primary-dark-color);
         }
-
         .pagination button:disabled {
             background-color: var(--disabled-color);
             cursor: not-allowed;
         }
-
         .pagination span {
             font-weight: 500;
         }
-
         .chart-container {
             width: 100%;
             height: 400px;
             margin-top: 20px;
             position: relative;
         }
-
         .promotion-type-toggle {
             display: flex;
             gap: 10px;
             margin-bottom: 15px;
         }
-
         .promotion-type-toggle button {
             flex: 1;
             padding: 10px;
@@ -4457,17 +4301,14 @@ if ($settings_result) {
             cursor: pointer;
             transition: all 0.3s ease;
         }
-
         .promotion-type-toggle button.active {
             background-color: var(--primary-color);
             color: white;
             border-color: var(--primary-color);
         }
-
         .item-picker {
             position: relative;
         }
-
         .item-picker-results {
             position: absolute;
             background-color: var(--surface-color);
@@ -4479,17 +4320,14 @@ if ($settings_result) {
             z-index: 10;
             box-shadow: 0 4px 8px var(--shadow-color);
         }
-
         .item-picker-results div {
             padding: 8px 15px;
             cursor: pointer;
             transition: background-color 0.2s;
         }
-
         .item-picker-results div:hover {
             background-color: var(--background-color);
         }
-
         #login-container {
             display: flex;
             justify-content: center;
@@ -4498,7 +4336,6 @@ if ($settings_result) {
             background-color: var(--background-color);
             width: 100%;
         }
-
         .login-card {
             background-color: var(--surface-color);
             padding: 40px;
@@ -4509,27 +4346,22 @@ if ($settings_result) {
             text-align: center;
             border: 1px solid var(--border-color);
         }
-
         .login-card h2 {
             color: var(--primary-color);
             margin-bottom: 30px;
             font-size: 2em;
         }
-
         .login-card .form-group {
             text-align: left;
         }
-
         .login-card .form-group input {
             background-color: var(--background-color);
         }
-
         .login-card .btn-primary {
             width: 100%;
             margin-top: 20px;
             padding: 12px;
         }
-
         .table-responsive {
             display: block;
             width: 100%;
@@ -4555,7 +4387,6 @@ if ($settings_result) {
                 width: 200px;
             }
         }
-
         @media (max-width: 768px) {
             #app-container {
                 flex-direction: column;
@@ -4563,7 +4394,6 @@ if ($settings_result) {
                 border-radius: 0;
                 box-shadow: none;
             }
-
             aside.sidebar {
                 width: 100%;
                 height: auto;
@@ -4575,22 +4405,18 @@ if ($settings_result) {
                 justify-content: space-between;
                 align-items: center;
             }
-
             aside.sidebar h2 {
                 margin-bottom: 0;
                 border-bottom: none;
                 padding-bottom: 0;
                 font-size: 1.5em;
             }
-
             aside.sidebar nav {
                 display: none;
             }
-
             aside.sidebar .dark-mode-toggle {
                 margin-top: 0;
             }
-
             .hamburger-menu {
                 display: block !important;
                 background: none;
@@ -4599,137 +4425,109 @@ if ($settings_result) {
                 font-size: 1.8em;
                 cursor: pointer;
             }
-
             aside.sidebar.active {
                 flex-direction: column;
                 align-items: flex-start;
             }
-
             aside.sidebar.active nav {
                 display: block;
                 width: 100%;
                 margin-top: 20px;
             }
-
             aside.sidebar.active nav ul {
                 flex-direction: column;
             }
-
             aside.sidebar.active nav ul li {
                 margin: 0;
             }
-
             aside.sidebar.active nav ul li a {
                 padding: 15px 20px;
                 border-radius: 0;
             }
-
             main.content {
                 padding: 15px;
             }
-
             .dashboard-grid {
                 grid-template-columns: 1fr;
             }
-
             .page-header {
                 flex-direction: column;
                 align-items: flex-start;
                 gap: 15px;
             }
-
             .page-header h1 {
                 font-size: 1.8em;
             }
-
             .search-sort-controls,
             .report-filters,
             .flex-group {
                 flex-direction: column;
                 gap: 10px;
             }
-
             .form-actions {
                 flex-direction: column;
             }
-
             .form-actions .btn {
                 width: 100%;
             }
-
             .data-table th,
             .data-table td {
                 padding: 8px 10px;
             }
-
             .data-table .actions {
                 flex-direction: column;
                 gap: 2px;
             }
-
             .data-table .actions .btn {
                 width: 100%;
                 text-align: center;
             }
-
             .hamburger-menu {
                 order: -1;
             }
-
             .public-header {
                 flex-direction: column;
                 padding: 15px 20px;
             }
-
             .public-header .logo {
                 margin-bottom: 15px;
             }
-
             .public-header nav ul {
                 flex-direction: column;
                 gap: 10px;
                 margin-bottom: 15px;
             }
-
             .public-content {
                 padding: 20px;
                 margin: 10px auto;
             }
-
             .hero-section {
                 padding: 40px 15px;
             }
-
             .hero-section h1 {
                 font-size: 2.5em;
             }
-
             .hero-section p {
                 font-size: 1.1em;
             }
-
             .book-grid {
                 grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
             }
-
             .global-search-bar {
                 position: static;
                 flex-wrap: wrap;
             }
-
             .global-search-results {
                 left: 0;
                 right: 0;
                 width: 100%;
             }
         }
-
         @media (max-width: 480px) {
             .modal-content {
                 padding: 20px;
             }
         }
-
         .hamburger-menu {
             display: inline-flex;
             align-items: center;
@@ -4743,7 +4541,6 @@ if ($settings_result) {
             cursor: pointer;
             margin-right: 10px;
         }
-
         .whatsapp-btn {
             background-color: #25d366;
             color: white;
@@ -4756,11 +4553,9 @@ if ($settings_result) {
             font-size: 0.9em;
             transition: background-color 0.3s;
         }
-
         .whatsapp-btn:hover {
             background-color: #128c7e;
         }
-
         .about-header,
         .contact-header {
             text-align: center;
@@ -4771,14 +4566,12 @@ if ($settings_result) {
             margin-bottom: 40px;
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
         }
-
         .about-header h1,
         .contact-header h1 {
             font-size: 3em;
             margin-bottom: 10px;
             font-weight: 700;
         }
-
         .about-header p,
         .contact-header p {
             font-size: 1.2em;
@@ -4786,14 +4579,12 @@ if ($settings_result) {
             max-width: 700px;
             margin: 0 auto;
         }
-
         .mission-vision-container {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 30px;
             margin-bottom: 50px;
         }
-
         .mv-card {
             background: var(--surface-color);
             padding: 35px;
@@ -4806,30 +4597,25 @@ if ($settings_result) {
             border-right: 1px solid var(--border-color);
             border-bottom: 1px solid var(--border-color);
         }
-
         .mv-card:hover {
             transform: translateY(-8px);
         }
-
         .mv-card i {
             font-size: 3em;
             color: var(--accent-color);
             margin-bottom: 20px;
         }
-
         .mv-card h3 {
             font-size: 1.5em;
             margin-bottom: 15px;
             color: var(--primary-color);
         }
-
         .features-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
             gap: 25px;
             margin-top: 30px;
         }
-
         .feature-item {
             display: flex;
             align-items: flex-start;
@@ -4839,43 +4625,36 @@ if ($settings_result) {
             border-radius: 10px;
             transition: background 0.3s;
         }
-
         .feature-item:hover {
             background: var(--surface-color);
             box-shadow: 0 2px 10px var(--shadow-color);
         }
-
         .feature-item i {
             font-size: 2em;
             color: var(--primary-color);
         }
-
         .feature-item h4 {
             margin-bottom: 5px;
             font-size: 1.1em;
             color: var(--text-color);
         }
-
         .feature-item p {
             font-size: 0.9em;
             color: var(--light-text-color);
             margin: 0;
             line-height: 1.5;
         }
-
         .contact-wrapper {
             display: grid;
             grid-template-columns: 1fr 1.5fr;
             gap: 40px;
             margin-bottom: 40px;
         }
-
         @media(max-width: 850px) {
             .contact-wrapper {
                 grid-template-columns: 1fr;
             }
         }
-
         .contact-info-box {
             background: var(--primary-color);
             color: white;
@@ -4886,18 +4665,15 @@ if ($settings_result) {
             flex-direction: column;
             justify-content: center;
         }
-
         .contact-info-item {
             display: flex;
             align-items: center;
             gap: 15px;
             margin-bottom: 30px;
         }
-
         .contact-info-item:last-child {
             margin-bottom: 0;
         }
-
         .contact-info-item i {
             font-size: 1.4em;
             background: rgba(255, 255, 255, 0.2);
@@ -4910,7 +4686,6 @@ if ($settings_result) {
             align-items: center;
             flex-shrink: 0;
         }
-
         .contact-info-item div h4 {
             font-size: 0.9em;
             opacity: 0.8;
@@ -4918,23 +4693,19 @@ if ($settings_result) {
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
-
         .contact-info-item div p {
             font-size: 1.1em;
             font-weight: 600;
             margin: 0;
         }
-
         .contact-info-item a {
             color: white;
             text-decoration: none;
             transition: opacity 0.2s;
         }
-
         .contact-info-item a:hover {
             opacity: 0.8;
         }
-
         .contact-form-box {
             background: var(--surface-color);
             padding: 40px;
@@ -4942,7 +4713,6 @@ if ($settings_result) {
             box-shadow: 0 5px 20px var(--shadow-color);
             border: 1px solid var(--border-color);
         }
-
         .map-container {
             height: 450px;
             border-radius: 12px;
@@ -4950,16 +4720,13 @@ if ($settings_result) {
             box-shadow: 0 5px 15px var(--shadow-color);
             border: 5px solid var(--surface-color);
         }
-
         .mobile-header-breadcrumb {
             display: none;
         }
-
         @media (max-width: 768px) {
             aside.sidebar h2 {
                 display: none;
             }
-
             .mobile-header-breadcrumb {
                 display: flex;
                 align-items: center;
@@ -4970,23 +4737,19 @@ if ($settings_result) {
                 margin-left: 10px;
                 flex-grow: 1;
             }
-
             .mobile-header-breadcrumb a {
                 color: inherit;
                 text-decoration: none;
             }
         }
-
         .mobile-breadcrumb {
             display: none;
         }
-
         @media (max-width: 768px) {
             #app-container {
                 flex-direction: column;
                 margin: 0;
             }
-
             aside.sidebar {
                 width: 100%;
                 height: auto;
@@ -4998,12 +4761,10 @@ if ($settings_result) {
                 top: 0;
                 z-index: 1000;
             }
-
             .mobile-breadcrumb,
             .mobile-header-breadcrumb {
                 display: none !important;
             }
-
             aside.sidebar h2 {
                 display: block !important;
                 margin: 0 0 0 15px !important;
@@ -5012,36 +4773,30 @@ if ($settings_result) {
                 padding-bottom: 0 !important;
                 white-space: nowrap;
             }
-
             .hamburger-menu {
                 display: block !important;
                 order: -1;
             }
-
             aside.sidebar .user-info,
             aside.sidebar .dark-mode-toggle {
                 display: none;
             }
-
             aside.sidebar.active .user-info,
             aside.sidebar.active .dark-mode-toggle {
                 display: block;
             }
         }
-
         .table-responsive {
             display: block;
             width: 100%;
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
         }
-
         main.content {
             width: 100%;
             max-width: 100vw;
             overflow-x: hidden;
         }
-
         body.sidebar-collapsed aside.sidebar {
             width: 88px !important;
             padding-inline: 12px !important;
@@ -5278,7 +5033,6 @@ if ($settings_result) {
             }
         }
     </style>
-
     <style id="minimalist-compact-overrides">
         :root {
             --primary-color: #111827;
@@ -5298,7 +5052,6 @@ if ($settings_result) {
             --disabled-color: #cbd5e1;
             --page-max-width: 1440px;
         }
-
         [data-theme='dark'] {
             --primary-color: #f8fafc;
             --primary-dark-color: #e2e8f0;
@@ -5316,34 +5069,28 @@ if ($settings_result) {
             --info-color: #60a5fa;
             --disabled-color: #334155;
         }
-
         html {
             font-size: 15px;
             scroll-behavior: smooth;
         }
-
         body {
             background: var(--background-color);
             color: var(--text-color);
             line-height: 1.45;
             font-size: 0.95rem;
         }
-
         * {
             scrollbar-width: thin;
             scrollbar-color: rgba(107, 114, 128, 0.4) transparent;
         }
-
         *::-webkit-scrollbar {
             width: 8px;
             height: 8px;
         }
-
         *::-webkit-scrollbar-thumb {
             background: rgba(107, 114, 128, 0.32);
             border-radius: 999px;
         }
-
         #app-container,
         #public-site-container,
         #login-container {
@@ -5355,11 +5102,9 @@ if ($settings_result) {
             border-radius: 0;
             overflow: visible;
         }
-
         #login-container {
             padding: 24px;
         }
-
         .login-card,
         .card,
         .dashboard-card,
@@ -5372,7 +5117,6 @@ if ($settings_result) {
             border: 1px solid var(--border-color);
             box-shadow: 0 12px 28px var(--shadow-color);
         }
-
         .card,
         .dashboard-card,
         .public-content,
@@ -5382,7 +5126,6 @@ if ($settings_result) {
         .contact-form-box {
             border-radius: 16px;
         }
-
         .card,
         .public-content,
         .login-card,
@@ -5390,26 +5133,22 @@ if ($settings_result) {
         .contact-form-box {
             padding: 16px;
         }
-
         .dashboard-card {
             border-radius: 18px;
             padding: 18px;
             min-height: 118px;
         }
-
         .dashboard-card h3 {
             font-size: 0.9rem;
             margin-bottom: 8px;
             color: var(--light-text-color);
             font-weight: 600;
         }
-
         .dashboard-card p {
             font-size: 1.85rem;
             line-height: 1.1;
             letter-spacing: -0.03em;
         }
-
         aside.sidebar {
             width: 248px;
             padding: 16px;
@@ -5418,7 +5157,6 @@ if ($settings_result) {
             box-shadow: none;
             gap: 8px;
         }
-
         aside.sidebar h2 {
             margin-bottom: 14px;
             padding-bottom: 12px;
@@ -5427,11 +5165,9 @@ if ($settings_result) {
             text-align: left;
             border-bottom: 1px solid var(--border-color);
         }
-
         aside.sidebar nav ul li {
             margin-bottom: 4px;
         }
-
         aside.sidebar nav ul li a {
             min-height: 40px;
             padding: 9px 12px;
@@ -5439,74 +5175,62 @@ if ($settings_result) {
             font-size: 0.92rem;
             color: var(--light-text-color);
         }
-
         aside.sidebar nav ul li a i {
             width: 18px;
             margin-right: 10px;
             font-size: 0.95rem;
         }
-
         aside.sidebar nav ul li a:hover,
         aside.sidebar nav ul li a.active {
             background: var(--secondary-accent-color);
             color: var(--text-color);
             box-shadow: none;
         }
-
         .user-info,
         .dark-mode-toggle {
             border: 1px solid var(--border-color);
             border-radius: 12px;
             background: rgba(148, 163, 184, 0.05);
         }
-
         .user-info {
             margin-top: 12px;
             padding: 12px;
             font-size: 0.82rem;
         }
-
         .dark-mode-toggle {
             margin-top: 10px;
             padding: 10px 12px;
         }
-
         main.content {
             padding: 18px;
             background: transparent;
         }
-
         .page-header {
             margin-bottom: 16px;
             padding-bottom: 12px;
             border-bottom: 1px solid var(--border-color);
             gap: 12px;
         }
-
         .page-header h1,
         .card-header {
             color: var(--text-color);
             letter-spacing: -0.02em;
         }
-
         .page-header h1 {
             font-size: 1.45rem;
             font-weight: 700;
         }
-
         .card-header {
             font-size: 1rem;
             margin-bottom: 12px;
             padding-bottom: 10px;
             border-bottom: 1px solid var(--border-color);
         }
-
         .dashboard-grid {
             gap: 14px;
             margin-bottom: 16px;
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
         }
-
         .btn {
             min-height: 38px;
             padding: 8px 14px;
@@ -5516,49 +5240,39 @@ if ($settings_result) {
             gap: 7px;
             box-shadow: none;
         }
-
         .btn:hover:not(:disabled) {
             transform: translateY(-1px);
             box-shadow: 0 8px 18px var(--shadow-color);
         }
-
         .btn-primary {
             background: var(--accent-color);
             color: #fff;
         }
-
         .btn-primary:hover:not(:disabled) {
             background: #1d4ed8;
         }
-
         .btn-secondary {
             background: var(--surface-color);
             color: var(--text-color);
         }
-
         .btn-danger {
             background: var(--danger-color);
         }
-
         .btn-success {
             background: var(--success-color);
         }
-
         .btn-info {
             background: var(--info-color);
         }
-
         .form-group {
             margin-bottom: 12px;
         }
-
         .form-group label {
             margin-bottom: 6px;
             font-size: 0.84rem;
             font-weight: 600;
             color: var(--light-text-color);
         }
-
         .form-group input[type="text"],
         .form-group input[type="number"],
         .form-group input[type="email"],
@@ -5579,12 +5293,10 @@ if ($settings_result) {
             color: var(--text-color);
             box-shadow: none;
         }
-
         .form-group textarea {
             min-height: 110px;
             resize: vertical;
         }
-
         .form-group input:focus,
         .form-group textarea:focus,
         .form-group select:focus,
@@ -5592,13 +5304,11 @@ if ($settings_result) {
             border-color: rgba(37, 99, 235, 0.45);
             box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.10);
         }
-
         .search-sort-controls,
         .report-filters,
         .flex-group {
             gap: 12px;
         }
-
         .global-search-bar {
             position: sticky;
             top: 0;
@@ -5611,11 +5321,9 @@ if ($settings_result) {
             border-radius: 16px;
             box-shadow: 0 12px 28px var(--shadow-color);
         }
-
         [data-theme='dark'] .global-search-bar {
             background: rgba(18, 26, 43, 0.9);
         }
-
         .global-search-results {
             position: absolute;
             top: calc(100% + 6px);
@@ -5626,12 +5334,10 @@ if ($settings_result) {
             box-shadow: 0 20px 40px var(--shadow-color);
             overflow: hidden;
         }
-
         .global-search-results div {
             padding: 10px 12px;
             font-size: 0.88rem;
         }
-
         .data-table {
             margin-top: 14px;
             border-radius: 14px;
@@ -5639,83 +5345,68 @@ if ($settings_result) {
             border: 1px solid var(--border-color);
             overflow: hidden;
         }
-
         .data-table thead {
             background: #f8fafc;
             color: var(--light-text-color);
         }
-
         [data-theme='dark'] .data-table thead {
             background: #162033;
         }
-
         .data-table th,
         .data-table td {
             padding: 10px 12px;
             font-size: 0.87rem;
             vertical-align: middle;
         }
-
         .data-table th {
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.03em;
             font-size: 0.72rem;
         }
-
         .data-table td {
             color: var(--text-color);
         }
-
         .data-table tbody tr:hover {
             background: rgba(37, 99, 235, 0.03);
         }
-
         .data-table .actions {
             gap: 6px;
             flex-wrap: wrap;
         }
-
         .data-table .actions .btn {
             min-height: 32px;
             padding: 6px 10px;
             font-size: 0.78rem;
             border-radius: 8px;
         }
-
         .table-responsive {
             border-radius: 14px;
         }
-
         .pagination {
             margin-top: 14px;
             gap: 8px;
             flex-wrap: wrap;
         }
-
         .pagination button {
             min-height: 36px;
             padding: 8px 12px;
             border-radius: 10px;
             font-size: 0.85rem;
         }
-
         .modal-content {
             width: min(560px, calc(100vw - 24px));
             max-height: calc(100vh - 36px);
             padding: 18px;
         }
-
         .modal-header {
             margin-bottom: 14px;
             padding-bottom: 10px;
         }
-
         .modal-header h3 {
             font-size: 1.05rem;
             color: var(--text-color);
         }
-
         .modal-close {
             width: 34px;
             height: 34px;
@@ -5725,7 +5416,6 @@ if ($settings_result) {
             justify-content: center;
             background: transparent;
         }
-
         .toast {
             min-width: 220px;
             max-width: 340px;
@@ -5734,7 +5424,6 @@ if ($settings_result) {
             font-size: 0.88rem;
             box-shadow: 0 18px 32px rgba(15, 23, 42, 0.16);
         }
-
         .hero-section,
         .about-header,
         .contact-header {
@@ -5742,26 +5431,22 @@ if ($settings_result) {
             box-shadow: none;
             background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
         }
-
         .hero-section {
             padding: 40px 28px;
             margin-bottom: 20px;
         }
-
         .hero-section h1 {
             font-size: clamp(1.8rem, 3vw, 2.8rem);
             line-height: 1.08;
             margin-bottom: 14px;
             text-shadow: none;
         }
-
         .hero-section p {
             max-width: 760px;
             margin-bottom: 22px;
             font-size: 0.98rem;
             color: rgba(255,255,255,0.8);
         }
-
         .hero-section .btn-primary {
             min-height: 42px;
             padding: 10px 18px;
@@ -5770,7 +5455,6 @@ if ($settings_result) {
             background: #fff;
             color: #111827;
         }
-
         .public-header {
             position: sticky;
             top: 0;
@@ -5782,22 +5466,18 @@ if ($settings_result) {
             border-bottom: 1px solid var(--border-color);
             box-shadow: none;
         }
-
         [data-theme='dark'] .public-header {
             background: rgba(11, 18, 32, 0.92);
         }
-
         .public-header .logo {
             font-size: 1.1rem;
             font-weight: 700;
             color: var(--text-color);
         }
-
         .public-header nav {
             flex: 1;
             min-width: 0;
         }
-
         .public-header nav ul {
             gap: 8px;
             align-items: center;
@@ -5805,11 +5485,9 @@ if ($settings_result) {
             overflow-x: auto;
             padding-bottom: 2px;
         }
-
         .public-header nav ul li {
             flex: 0 0 auto;
         }
-
         .public-header nav ul li a {
             padding: 8px 10px;
             font-size: 0.88rem;
@@ -5817,17 +5495,14 @@ if ($settings_result) {
             border-radius: 999px;
             white-space: nowrap;
         }
-
         .public-header nav ul li a::after {
             display: none;
         }
-
         .public-header nav ul li a:hover,
         .public-header nav ul li a.active {
             background: var(--secondary-accent-color);
             color: var(--text-color);
         }
-
         .public-header .login-btn {
             padding: 9px 14px;
             border-radius: 999px;
@@ -5835,7 +5510,6 @@ if ($settings_result) {
             background: var(--accent-color);
             color: #fff;
         }
-
         .public-content {
             width: calc(100% - 24px);
             max-width: 1220px;
@@ -5845,13 +5519,11 @@ if ($settings_result) {
             box-shadow: none;
             border: none;
         }
-
         .book-grid {
             gap: 14px;
             margin-top: 16px;
             grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
         }
-
         .book-card {
             padding: 12px;
             border-radius: 16px;
@@ -5859,7 +5531,6 @@ if ($settings_result) {
             box-shadow: none;
             background: var(--surface-color);
         }
-
         .book-card img {
             height: 160px;
             margin-bottom: 12px;
@@ -5867,14 +5538,12 @@ if ($settings_result) {
             padding: 0;
             background: #f8fafc;
         }
-
         .book-card h3 {
             margin-bottom: 4px;
             font-size: 0.96rem;
             line-height: 1.35;
             white-space: normal;
         }
-
         .book-card p,
         .book-card .stock-info,
         .feature-item p,
@@ -5885,18 +5554,15 @@ if ($settings_result) {
         .contact-header p {
             font-size: 0.84rem;
         }
-
         .book-card .price {
             margin-bottom: 8px;
             font-size: 1rem;
             color: var(--text-color);
         }
-
         .public-product-actions {
             gap: 8px;
             justify-content: flex-start;
         }
-
         .public-product-actions .btn,
         .whatsapp-btn {
             min-height: 34px;
@@ -5904,72 +5570,60 @@ if ($settings_result) {
             font-size: 0.8rem;
             border-radius: 9px;
         }
-
         .whatsapp-btn {
             background: #16a34a;
         }
-
         .about-header,
         .contact-header {
             margin-bottom: 20px;
             padding: 32px 20px;
         }
-
         .about-header h1,
         .contact-header h1 {
             font-size: clamp(1.6rem, 3vw, 2.2rem);
             margin-bottom: 10px;
         }
-
         .mission-vision-container,
         .features-grid,
         .contact-wrapper {
             gap: 16px;
             margin-bottom: 20px;
         }
-
         .mv-card,
         .contact-info-box,
         .contact-form-box {
             padding: 20px;
             border-radius: 18px;
         }
-
         .mv-card i,
         .feature-item i {
             font-size: 1.5rem;
         }
-
         .mv-card h3,
         .contact-form-box h3 {
             font-size: 1.05rem;
             margin-bottom: 10px;
         }
-
         .feature-item {
             gap: 12px;
             padding: 16px;
             border-radius: 14px;
         }
-
         .contact-info-item {
             gap: 12px;
             margin-bottom: 18px;
         }
-
         .contact-info-item i {
             width: 40px;
             height: 40px;
             font-size: 1rem;
             padding: 0;
         }
-
         .map-container {
             height: 300px;
             border-radius: 18px;
             border-width: 1px;
         }
-
         .public-footer {
             margin-top: 18px;
             padding: 16px 18px;
@@ -5977,17 +5631,14 @@ if ($settings_result) {
             background: transparent;
             box-shadow: none;
         }
-
         .login-card {
             width: min(380px, 100%);
             padding: 24px;
         }
-
         .login-card h2 {
             font-size: 1.4rem;
             margin-bottom: 18px;
         }
-
         .report-controls,
         .form-actions,
         #cart-actions,
@@ -5995,30 +5646,25 @@ if ($settings_result) {
             gap: 8px;
             flex-wrap: wrap;
         }
-
         #cart-summary,
         #online-cart-summary {
             margin-top: 16px;
             padding-top: 14px;
             font-size: 1rem;
         }
-
         .img-preview {
             width: 88px;
             height: 88px;
             border-radius: 12px;
         }
-
         .low-stock {
             background: rgba(217, 119, 6, 0.08) !important;
             color: var(--warning-color) !important;
         }
-
         .inactive-customer {
             background: rgba(220, 38, 38, 0.08) !important;
             color: var(--danger-color) !important;
         }
-
         .sidebar-backdrop {
             position: fixed;
             inset: 0;
@@ -6028,7 +5674,6 @@ if ($settings_result) {
             transition: opacity 0.2s ease, visibility 0.2s ease;
             z-index: 998;
         }
-
         body.sidebar-open .sidebar-backdrop {
             opacity: 1;
             visibility: visible;
@@ -6044,7 +5689,6 @@ if ($settings_result) {
         .pos-card .title { font-size: 0.85rem; font-weight: 600; line-height: 1.2; margin-bottom: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
         .pos-card .price { font-weight: 700; color: var(--primary-color); font-size: 0.95rem; }
         .pos-card .stock-badge { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.7); color: #fff; font-size: 0.7rem; padding: 2px 6px; border-radius: 6px; font-weight: 600; }
-        
         .pos-cart-panel { background: var(--surface-color); border-radius: 16px; border: 1px solid var(--border-color); box-shadow: 0 12px 28px var(--shadow-color); display: flex; flex-direction: column; height: 100%; overflow: hidden; }
         .pos-cart-header { padding: 16px; border-bottom: 1px solid var(--border-color); font-weight: 700; font-size: 1.1rem; display: flex; justify-content: space-between; align-items: center; }
         .pos-cart-items-wrap { flex-grow: 1; overflow-y: auto; padding: 10px; }
@@ -6059,13 +5703,11 @@ if ($settings_result) {
         .pos-disc-group { display: flex; align-items: center; gap: 5px; }
         .pos-disc-group label { font-size: 0.75rem; color: var(--light-text-color); font-weight: 600; text-transform: uppercase; }
         .pos-disc-group input { width: 60px; padding: 5px; border: 1px solid var(--border-color); border-radius: 6px; text-align: right; font-size: 0.85rem; background: var(--surface-color); color: var(--text-color); }
-        
         .pos-totals-panel { background: var(--background-color); padding: 16px; border-top: 1px solid var(--border-color); }
         .pos-summary-row { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.9rem; color: var(--light-text-color); }
         .pos-summary-row.grand { font-size: 1.3rem; font-weight: 700; color: var(--primary-color); border-top: 1px dashed var(--border-color); padding-top: 10px; margin-top: 5px; margin-bottom: 12px; }
         .pos-action-btns { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
         .pos-action-btns .btn { padding: 14px; font-size: 1rem; border-radius: 12px; }
-        
         @media (max-width: 1024px) {
             .pos-wrapper { grid-template-columns: 1fr; height: auto; }
             .pos-cart-panel { height: 500px; }
@@ -6074,21 +5716,17 @@ if ($settings_result) {
             aside.sidebar {
                 width: 224px;
             }
-
             .dashboard-grid {
                 grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             }
         }
-
         @media (max-width: 900px) {
             html {
                 font-size: 14px;
             }
-
             #app-container {
                 flex-direction: column;
             }
-
             body aside.sidebar {
                 position: fixed !important;
                 top: 0 !important;
@@ -6108,28 +5746,23 @@ if ($settings_result) {
                 align-items: stretch !important;
                 justify-content: flex-start !important;
             }
-
             body aside.sidebar.active {
                 transform: translateX(0);
             }
-
             body aside.sidebar h2 {
                 display: block !important;
                 margin: 0 0 12px 0 !important;
                 font-size: 1rem !important;
             }
-
             body aside.sidebar nav {
                 display: block !important;
                 width: 100%;
                 margin-top: 2px;
             }
-
             body aside.sidebar .user-info,
             body aside.sidebar .dark-mode-toggle {
                 display: block !important;
             }
-
             .hamburger-menu {
                 display: inline-flex !important;
                 align-items: center;
@@ -6142,21 +5775,17 @@ if ($settings_result) {
                 color: var(--text-color);
                 box-shadow: none;
             }
-
             main.content {
                 width: 100%;
                 padding: 14px;
             }
-
             .global-search-bar {
                 margin-bottom: 12px;
                 padding: 10px;
             }
-
             .page-header {
                 align-items: flex-start;
             }
-
             .dashboard-grid,
             .book-grid,
             .mission-vision-container,
@@ -6164,48 +5793,39 @@ if ($settings_result) {
             .contact-wrapper {
                 grid-template-columns: 1fr;
             }
-
             .public-header {
                 padding: 12px 14px;
                 align-items: flex-start;
             }
-
             .public-header > div:last-child {
                 width: 100%;
                 justify-content: flex-start;
                 flex-wrap: wrap;
             }
-
             .public-content {
                 width: calc(100% - 16px);
                 margin-top: 10px;
                 padding: 14px;
             }
-
             .hero-section,
             .about-header,
             .contact-header {
                 padding: 24px 16px;
                 border-radius: 18px;
             }
-
             .hero-section h1 {
                 font-size: 1.7rem;
             }
-
             .book-grid {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
                 gap: 10px;
             }
-
             .book-card {
                 padding: 10px;
             }
-
             .book-card img {
                 height: 126px;
             }
-
             .search-sort-controls,
             .report-filters,
             .flex-group,
@@ -6216,7 +5836,6 @@ if ($settings_result) {
                 flex-direction: column;
                 gap: 8px;
             }
-
             .search-sort-controls .form-group,
             .report-filters .form-group,
             .flex-group .form-group,
@@ -6226,17 +5845,14 @@ if ($settings_result) {
             .report-controls .btn {
                 width: 100%;
             }
-
             .modal-content {
                 width: calc(100vw - 16px);
                 max-height: calc(100vh - 16px);
                 padding: 16px;
             }
-
             .table-responsive {
                 overflow: visible;
             }
-
             .data-table,
             .data-table thead,
             .data-table tbody,
@@ -6245,22 +5861,18 @@ if ($settings_result) {
                 display: block;
                 width: 100%;
             }
-
             .data-table thead {
                 display: none;
             }
-
             .data-table {
                 border: none;
                 background: transparent;
                 box-shadow: none;
             }
-
             .data-table tbody {
                 display: grid;
                 gap: 10px;
             }
-
             .data-table tbody tr {
                 background: var(--surface-color);
                 border: 1px solid var(--border-color);
@@ -6268,7 +5880,6 @@ if ($settings_result) {
                 box-shadow: 0 10px 22px var(--shadow-color);
                 padding: 10px;
             }
-
             .data-table td {
                 border: none;
                 padding: 7px 0 7px 108px;
@@ -6277,7 +5888,6 @@ if ($settings_result) {
                 text-align: left !important;
                 font-size: 0.84rem;
             }
-
             .data-table td::before {
                 content: attr(data-label);
                 position: absolute;
@@ -6290,12 +5900,10 @@ if ($settings_result) {
                 text-transform: uppercase;
                 color: var(--light-text-color);
             }
-
             .data-table td.actions,
             .data-table td:last-child {
                 padding-left: 0;
             }
-
             .data-table td.actions::before,
             .data-table td:last-child::before {
                 position: static;
@@ -6303,45 +5911,35 @@ if ($settings_result) {
                 width: auto;
                 margin-bottom: 6px;
             }
-
             .data-table .actions {
                 justify-content: flex-start;
             }
         }
-
         @media (max-width: 560px) {
             .public-header .logo {
                 font-size: 1rem;
             }
-
             .book-grid {
                 grid-template-columns: 1fr 1fr;
             }
-
             .book-card img {
                 height: 112px;
             }
-
             .dashboard-card p {
                 font-size: 1.6rem;
             }
-
             .data-table td {
                 padding-left: 92px;
             }
-
             .data-table td::before {
                 width: 80px;
             }
-
             .login-card {
                 padding: 18px;
             }
         }
     </style>
-
 </head>
-
 <body>
     <?php if ($page === 'login' || $page === 'customer-login' || $page === 'customer-register'): ?>
         <div id="login-container">
@@ -7106,7 +6704,6 @@ if ($settings_result) {
                                     <p id="dash-pending-orders" class="danger">0</p>
                                 </div>
                             </div>
-                            
                             <div class="dashboard-grid">
                                 <div class="dashboard-card">
                                     <h3>Total Products</h3>
@@ -7125,7 +6722,6 @@ if ($settings_result) {
                                     <p id="dash-low-stock" class="danger">0</p>
                                 </div>
                             </div>
-
                             <div class="dashboard-grid">
                                 <div class="dashboard-card">
                                     <h3>Total Stock Value</h3>
@@ -7144,7 +6740,6 @@ if ($settings_result) {
                                     <p id="dash-active-promos">0</p>
                                 </div>
                             </div>
-
                             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; margin-bottom: 20px;">
                                 <div class="card">
                                     <div class="card-header">Last 7 Days Revenue</div>
@@ -7155,7 +6750,6 @@ if ($settings_result) {
                                     <div style="height:300px;"><canvas id="dash-top-chart"></canvas></div>
                                 </div>
                             </div>
-                            
                             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; margin-bottom: 20px;">
                                 <div class="card">
                                     <div class="card-header">Sales vs Expenses (Last 6 Months)</div>
@@ -7166,7 +6760,6 @@ if ($settings_result) {
                                     <div style="height:300px;"><canvas id="dash-orders-chart"></canvas></div>
                                 </div>
                             </div>
-
                             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;">
                                 <div class="card">
                                     <div class="card-header">Recent Sales</div>
@@ -7538,9 +7131,7 @@ if ($settings_result) {
                                     <button class="btn btn-secondary" id="view-sales-history-btn"><i class="fas fa-history"></i> Sales History</button>
                                 </div>
                             </div>
-                            
                             <div class="pos-wrapper">
-                                <!-- Left Panel: Products -->
                                 <div class="pos-main-panel">
                                     <div class="pos-header-controls">
                                         <input type="text" id="book-to-cart-search" placeholder="Search by name or barcode...">
@@ -7548,21 +7139,16 @@ if ($settings_result) {
                                         <button type="button" class="btn btn-secondary" id="scan-pos-barcode-btn" style="border-radius: 10px;"><i class="fas fa-barcode"></i> Scan</button>
                                     </div>
                                     <div class="pos-grid" id="books-for-cart-list">
-                                        <!-- Products injected here -->
                                     </div>
                                 </div>
-                                
-                                <!-- Right Panel: Cart & Checkout -->
                                 <div class="pos-cart-panel">
                                     <div class="pos-cart-header">
                                         Current Order
                                         <span class="status-pill success" id="cart-total-items" style="font-size: 14px;">0</span>
                                     </div>
-                                    
                                     <div class="pos-cart-items-wrap" id="cart-items-table">
                                         <div style="text-align:center; padding: 30px 10px; color: var(--light-text-color);">Cart is empty. Tap products to add.</div>
                                     </div>
-                                    
                                     <div class="pos-totals-panel">
                                         <div class="pos-summary-row">
                                             <span>Subtotal:</span>
@@ -7576,13 +7162,11 @@ if ($settings_result) {
                                             <span>Total:</span>
                                             <span id="cart-grand-total"><?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?> 0.00</span>
                                         </div>
-                                        
                                         <div style="display:flex; gap:10px; margin-bottom: 15px;">
                                             <input type="text" id="checkout-promotion-code" placeholder="Promo Code" style="flex:1; border-radius:10px; border: 1px solid var(--border-color); padding:0 12px; background: var(--surface-color); color: var(--text-color);">
                                             <button type="button" class="btn btn-info" id="apply-promo-btn" style="border-radius:10px;">Apply</button>
                                         </div>
                                         <p id="promo-message" style="color: var(--danger-color); font-size: 0.85em; margin-bottom: 10px; text-align:center;"></p>
-                                        
                                         <div class="pos-action-btns">
                                             <button class="btn btn-danger" id="clear-cart-btn" disabled><i class="fas fa-trash"></i></button>
                                             <button class="btn btn-success" id="checkout-btn" disabled><i class="fas fa-money-check-alt"></i> Checkout</button>
@@ -8080,7 +7664,6 @@ if ($settings_result) {
                         function generateBarcodePrint() {
                             const select = document.getElementById('print-barcode-select');
                             const copies = parseInt(document.getElementById('print-barcode-copies').value) || 1;
-                            
                             let items = [];
                             if(select.value === 'all') {
                                 for(let i=1; i<select.options.length; i++) {
@@ -8098,7 +7681,6 @@ if ($settings_result) {
                                     price: opt.getAttribute('data-price')
                                 });
                             }
-                            
                             let htmlContent = `
                                 <html>
                                 <head>
@@ -8135,15 +7717,12 @@ if ($settings_result) {
                                 </head>
                                 <body>
                             `;
-                            
                             let totalItems = [];
                             items.forEach(it => {
                                 for(let i=0; i<copies; i++) totalItems.push(it);
                             });
-                            
                             let pages = Math.ceil(totalItems.length / 18);
                             let itemIndex = 0;
-                            
                             for(let p=0; p<pages; p++) {
                                 htmlContent += `<div class="page">`;
                                 for(let i=0; i<18 && itemIndex < totalItems.length; i++) {
@@ -8169,7 +7748,6 @@ if ($settings_result) {
                                 <\/script>
                                 </body></html>
                             `;
-                            
                             let printWin = window.open('', '_blank');
                             printWin.document.write(htmlContent);
                             printWin.document.close();
@@ -9301,7 +8879,6 @@ if ($settings_result) {
             month: 'numeric',
             day: 'numeric'
         });
-
         function showToast(message, type = 'info') {
             const toast = document.createElement('div');
             toast.classList.add('toast', type);
@@ -9317,11 +8894,9 @@ if ($settings_result) {
                 toast.addEventListener('transitionend', () => toast.remove());
             }, 5000);
         }
-
         function showModal(modalElement) {
             modalElement.classList.add('active');
         }
-
         function hideModal(modalElement) {
             modalElement.classList.remove('active');
         }
@@ -9408,7 +8983,6 @@ if ($settings_result) {
                 }
             },
         };
-
         function updatePaginationControls(paginationConfig, totalItems) {
             const totalPages = Math.ceil(totalItems / PAGE_SIZE);
             paginationConfig.totalPages = totalPages === 0 ? 1 : totalPages;
@@ -9444,7 +9018,6 @@ if ($settings_result) {
         let dashTopChartInstance = null;
         let dashMonthlyChartInstance = null;
         let dashOrdersChartInstance = null;
-        
         async function updateDashboard() {
             if (!document.getElementById('dash-today-rev')) return;
             const statsData = await fetchJSON('index.php?action=get_dashboard_stats_json');
@@ -9452,24 +9025,19 @@ if ($settings_result) {
                 document.getElementById('dash-today-rev').textContent = formatCurrency(statsData.today_rev);
                 document.getElementById('dash-today-orders').textContent = statsData.today_cnt;
                 document.getElementById('dash-month-rev').textContent = formatCurrency(statsData.month_rev);
-                
                 const pendingEl = document.getElementById('dash-pending-orders');
                 pendingEl.textContent = statsData.pending_orders;
                 if(statsData.pending_orders > 0) pendingEl.classList.add('danger'); else pendingEl.classList.remove('danger');
-
                 document.getElementById('dash-total-products').textContent = statsData.total_products;
                 document.getElementById('dash-total-customers').textContent = statsData.total_customers;
                 document.getElementById('dash-total-suppliers').textContent = statsData.total_suppliers;
-                
                 const lowStockEl = document.getElementById('dash-low-stock');
                 lowStockEl.textContent = statsData.low_stock_cnt;
                 if(statsData.low_stock_cnt > 0) lowStockEl.classList.add('danger'); else lowStockEl.classList.remove('danger');
-                
                 document.getElementById('dash-stock-value').textContent = formatCurrency(statsData.stock_value);
                 document.getElementById('dash-lifetime-rev').textContent = formatCurrency(statsData.lifetime_rev);
                 document.getElementById('dash-total-expenses').textContent = formatCurrency(statsData.total_expenses);
                 document.getElementById('dash-active-promos').textContent = statsData.active_promos;
-
                 const ctxWeekly = document.getElementById('dash-weekly-chart').getContext('2d');
                 if (dashWeeklyChartInstance) dashWeeklyChartInstance.destroy();
                 dashWeeklyChartInstance = new Chart(ctxWeekly, {
@@ -9487,7 +9055,6 @@ if ($settings_result) {
                     },
                     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
                 });
-
                 const ctxTop = document.getElementById('dash-top-chart').getContext('2d');
                 if (dashTopChartInstance) dashTopChartInstance.destroy();
                 dashTopChartInstance = new Chart(ctxTop, {
@@ -9501,7 +9068,6 @@ if ($settings_result) {
                     },
                     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
                 });
-                
                 const ctxMonthly = document.getElementById('dash-monthly-chart').getContext('2d');
                 if (dashMonthlyChartInstance) dashMonthlyChartInstance.destroy();
                 dashMonthlyChartInstance = new Chart(ctxMonthly, {
@@ -9523,10 +9089,8 @@ if ($settings_result) {
                     },
                     options: { responsive: true, maintainAspectRatio: false }
                 });
-                
                 const ctxOrders = document.getElementById('dash-orders-chart').getContext('2d');
                 if (dashOrdersChartInstance) dashOrdersChartInstance.destroy();
-                
                 const orderLabels = statsData.chart_orders.map(o => o.status.charAt(0).toUpperCase() + o.status.slice(1));
                 const orderData = statsData.chart_orders.map(o => o.cnt);
                 const orderColors = statsData.chart_orders.map(o => {
@@ -9535,7 +9099,6 @@ if ($settings_result) {
                     if(o.status === 'rejected') return '#ef4444';
                     return '#6b7280';
                 });
-                
                 dashOrdersChartInstance = new Chart(ctxOrders, {
                     type: 'pie',
                     data: {
@@ -9548,7 +9111,6 @@ if ($settings_result) {
                     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
                 });
             }
-
             const recentSalesData = await fetchJSON('index.php?action=get_sales_json&page_num=1&limit=5');
             if (recentSalesData.success && elements.dashboardRecentSales) {
                 elements.dashboardRecentSales.innerHTML = recentSalesData.sales.length > 0 ? recentSalesData.sales.map(sale => `
@@ -9559,7 +9121,6 @@ if ($settings_result) {
                     </tr>
                 `).join('') : `<tr><td colspan="3">No recent sales.</td></tr>`;
             }
-
             const lowStockData = await fetchJSON('index.php?action=get_books_json&search=&sort=stock-asc&limit=10');
             if (lowStockData.success && elements.dashboardLowStockBooks) {
                 const lowStockBooks = lowStockData.books.filter(book => book.stock < 5);
@@ -9594,7 +9155,6 @@ if ($settings_result) {
                         </td>
                     </tr>
                 `).join('');
-                
                 const roleSelect = document.getElementById('sys-role-id');
                 if (roleSelect) {
                     roleSelect.innerHTML = roleData.roles.map(r => `<option value="${r.id}">${html(r.name)}</option>`).join('');
@@ -9618,7 +9178,6 @@ if ($settings_result) {
                 `).join('');
             }
         }
-        
         function openUserModal(id = '', username = '', roleId = '') {
             document.getElementById('sys-user-id').value = id;
             document.getElementById('sys-username').value = username;
@@ -9628,13 +9187,11 @@ if ($settings_result) {
             document.getElementById('user-modal-title').textContent = id ? 'Edit User' : 'Add New User';
             document.getElementById('user-modal').classList.add('active');
         }
-        
         function openRoleModal(id = null) {
             document.getElementById('sys-role-id-form').value = id || '';
             let role = id ? allRolesData.find(r => r.id == id) : null;
             document.getElementById('sys-role-name').value = role ? role.name : '';
             document.getElementById('role-modal-title').textContent = role ? 'Edit Role' : 'Add New Role';
-            
             const perms = role ? role.permissions : [];
             document.getElementById('sys-role-permissions').innerHTML = APP_PAGES.map(p => `
                 <label style="display:flex; align-items:center; gap:8px;">
@@ -9642,7 +9199,6 @@ if ($settings_result) {
                     ${p.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
                 </label>
             `).join('');
-            
             document.getElementById('role-modal').classList.add('active');
         }
         let liveSalesInterval = null;
@@ -9653,7 +9209,6 @@ if ($settings_result) {
                 document.getElementById('live-today-rev').textContent = formatCurrency(data.summary.revenue);
                 document.getElementById('live-today-orders').textContent = data.summary.orders;
                 document.getElementById('live-today-disc').textContent = formatCurrency(data.summary.discount);
-
                 const list = document.getElementById('live-sales-list');
                 list.innerHTML = data.recent_sales.length > 0 ? data.recent_sales.map(sale => {
                     const timeOnly = new Date(sale.sale_date).toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit', second:'2-digit'});
@@ -9762,7 +9317,6 @@ if ($settings_result) {
             }
             showModal(elements.bookModal);
         }
-
         function toggleBookFields(productType) {
             if (productType === 'book') {
                 elements.bookAuthorGroup.style.display = 'block';
@@ -10051,7 +9605,6 @@ if ($settings_result) {
             }
             showModal(elements.purchaseOrderModal);
         }
-
         function addPoItem(product) {
             const existingItem = currentPoItems.find(item => item.bookId === product.id);
             if (existingItem) {
@@ -10066,7 +9619,6 @@ if ($settings_result) {
             }
             renderPoItems();
         }
-
         function updatePoItemQuantity(bookId, quantity) {
             const itemIndex = currentPoItems.findIndex(item => item.bookId === bookId);
             if (itemIndex > -1) {
@@ -10074,7 +9626,6 @@ if ($settings_result) {
                 renderPoItems();
             }
         }
-
         function updatePoItemCost(bookId, cost) {
             const itemIndex = currentPoItems.findIndex(item => item.bookId === bookId);
             if (itemIndex > -1) {
@@ -10082,12 +9633,10 @@ if ($settings_result) {
                 renderPoItems();
             }
         }
-
         function removePoItem(bookId) {
             currentPoItems = currentPoItems.filter(item => item.bookId !== bookId);
             renderPoItems();
         }
-
         function renderPoItems() {
             let totalCost = 0;
             if (currentPoItems.length === 0) {
@@ -10145,7 +9694,6 @@ if ($settings_result) {
                     `).join('') : `<p>No products found matching your criteria.</p>`;
                 }
             } else {
-                // Admin/Staff POS layout
                 if (!elements.booksForCartList) return;
                 const search = elements.bookToCartSearch ? elements.bookToCartSearch.value : '';
                 const category = elements.posCategoryFilter ? elements.posCategoryFilter.value : 'all';
@@ -10235,7 +9783,6 @@ if ($settings_result) {
                 }
             }
         }
-
         function removeCartItem(bookId, isOnlineCart = false) {
             currentCart = currentCart.filter(item => item.bookId !== bookId);
             showToast('Item removed from cart.', 'info');
@@ -10261,7 +9808,6 @@ if ($settings_result) {
                     console.error(`Product ID ${item.bookId} not found for cart calculation.`);
                 }
             }
-            // First apply manual discounts per item
             for (const item of currentCart) {
                 if (item.custom_discount && item.custom_discount > 0) {
                     const manualDisc = Math.min(item.custom_discount, item.price);
@@ -10269,7 +9815,6 @@ if ($settings_result) {
                     totalDiscount += (manualDisc * item.quantity);
                 }
             }
-
             if (appliedPromotion) {
                 if (appliedPromotion.applies_to === 'all') {
                     const discountAmount = appliedPromotion.type === 'percentage' ?
@@ -10314,7 +9859,6 @@ if ($settings_result) {
                 renderCart();
             }
         }
-
         async function renderCart(isOnlineCart = false) {
             fetch('index.php?action=update_session_cart', {
                 method: 'POST',
@@ -10322,17 +9866,13 @@ if ($settings_result) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ cart: currentCart, promotion: appliedPromotion })
             }).catch(console.error);
-            
             const containerElement = isOnlineCart ? elements.onlineCartItemsTable : elements.cartItemsTable;
             const totalItemsSpan = isOnlineCart ? elements.onlineCartTotalItems : elements.cartTotalItems;
             const grandTotalSpan = isOnlineCart ? elements.onlineCartGrandTotal : elements.cartGrandTotal;
             const clearBtn = isOnlineCart ? elements.onlineClearCartBtn : elements.clearCartBtn;
             const checkoutBtn = isOnlineCart ? elements.placeOnlineOrderBtn : elements.checkoutBtn;
-            
             const { subtotal, discount, total } = await calculateCartTotals(isOnlineCart);
-            
             totalItemsSpan.textContent = currentCart.reduce((sum, item) => sum + item.quantity, 0);
-            
             if (currentCart.length === 0) {
                 containerElement.innerHTML = isOnlineCart ? `<tr><td colspan="6">Cart is empty.</td></tr>` : `<div style="text-align:center; padding: 30px 10px; color: var(--light-text-color);">Cart is empty. Tap products to add.</div>`;
                 clearBtn.disabled = true;
@@ -10389,15 +9929,12 @@ if ($settings_result) {
                 clearBtn.disabled = false;
                 checkoutBtn.disabled = false;
             }
-            
             grandTotalSpan.textContent = formatCurrency(total);
-            
             if (!isOnlineCart && elements.checkoutSubtotal) {
                 const subEl = document.getElementById('cart-subtotal-display');
                 const discEl = document.getElementById('cart-discount-display');
                 if (subEl) subEl.textContent = formatCurrency(subtotal);
                 if (discEl) discEl.textContent = formatCurrency(discount);
-                
                 elements.checkoutSubtotal.value = formatCurrency(subtotal);
                 elements.checkoutDiscount.value = formatCurrency(discount);
                 elements.checkoutTotal.value = formatCurrency(total);
@@ -10468,7 +10005,6 @@ if ($settings_result) {
             }
             renderCart(isOnlineCart);
         }
-
         function clearCart(isOnlineCart = false) {
             if (confirm('Are you sure you want to clear the entire cart?')) {
                 currentCart = [];
@@ -10574,10 +10110,8 @@ if ($settings_result) {
             const storeAddress = "<?php echo html(str_replace(["\r", "\n", '"'], [' ', ' ', '\"'], $public_settings['address'] ?? '')); ?>";
             const storePhone = "<?php echo html($public_settings['phone'] ?? ''); ?>";
             const currency = "<?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?>";
-            
             const dateStr = formatDate(sale.sale_date);
             let htmlContent = '';
-            
             if (type === 'thermal') {
                 htmlContent = `
                     <html><head><title>Thermal Receipt</title>
@@ -10602,7 +10136,6 @@ if ($settings_result) {
                         <div class="mb-1"><strong>Sale ID:</strong> ${sale.id}</div>
                         <div class="mb-1"><strong>Date:</strong> ${dateStr}</div>
                         <div class="mb-2"><strong>Customer:</strong> ${sale.customer_name || 'Guest'}</div>
-                        
                         <table>
                             <thead><tr><th style="width:40%;">Item</th><th class="text-right" style="width:15%;">Qty</th><th class="text-right" style="width:20%;">Price</th><th class="text-right" style="width:25%;">Total</th></tr></thead>
                             <tbody>
@@ -10681,7 +10214,6 @@ if ($settings_result) {
                     </body></html>
                 `;
             }
-            
             const printWin = window.open('', '_blank');
             if(printWin) {
                 printWin.document.write(htmlContent);
@@ -10937,7 +10469,6 @@ if ($settings_result) {
             }
             showModal(elements.expenseModal);
         }
-
         function updateReportFilters() {
             if (!elements.reportType) return;
             const type = elements.reportType.value;
@@ -10995,7 +10526,6 @@ if ($settings_result) {
                 }
             }
         }
-
         function renderChart(labels, datasets, type, title) {
             if (!elements.reportChart) return;
             const ctx = elements.reportChart.getContext('2d');
@@ -11045,7 +10575,6 @@ if ($settings_result) {
                 }
             });
         }
-
         function exportCurrentReport() {
             if (!elements.exportCurrentReportBtn) return;
             if (currentReportData.length === 0) {
@@ -11068,7 +10597,6 @@ if ($settings_result) {
             URL.revokeObjectURL(url);
             showToast('Report data exported successfully!', 'success');
         }
-
         function downloadDataAsCsv(data, filename) {
             if (!data || data.length === 0) {
                 showToast('No data to export.', 'warning');
@@ -11211,11 +10739,9 @@ if ($settings_result) {
                 elements.globalSearchResults.classList.add('active');
             }
         }
-
         function ucfirst(string) {
             return string.charAt(0).toUpperCase() + string.slice(1);
         }
-
         function setupEventListeners() {
             if (elements.darkModeSwitch) {
                 elements.darkModeSwitch.addEventListener('change', (e) => {
@@ -11708,15 +11234,12 @@ unset($_SESSION['last_sale_id']); ?>";
                     }
                 }
             }
-
             await openGlobalSearchTarget();
-
             window.addEventListener('hashchange', function () {
                 openGlobalSearchTarget();
             });
         });
     </script>
-
     <script id="minimalist-mobile-ux">
         (function () {
             function applyResponsiveTableLabels(root) {
@@ -11733,7 +11256,6 @@ unset($_SESSION['last_sale_id']); ?>";
                     });
                 });
             }
-
             function ensureBackdrop() {
                 if (document.querySelector('.sidebar-backdrop')) return;
                 var backdrop = document.createElement('div');
@@ -11743,14 +11265,12 @@ unset($_SESSION['last_sale_id']); ?>";
                 });
                 document.body.appendChild(backdrop);
             }
-
             function closeSidebar() {
                 var sidebar = document.querySelector('aside.sidebar');
                 if (!sidebar) return;
                 sidebar.classList.remove('active');
                 document.body.classList.remove('sidebar-open');
             }
-
             function syncSidebarState() {
                 var sidebar = document.querySelector('aside.sidebar');
                 if (!sidebar) return;
@@ -11761,11 +11281,9 @@ unset($_SESSION['last_sale_id']); ?>";
                     document.body.classList.toggle('sidebar-open', sidebar.classList.contains('active'));
                 }
             }
-
             document.addEventListener('DOMContentLoaded', function () {
                 ensureBackdrop();
                 applyResponsiveTableLabels(document);
-
                 var sidebar = document.querySelector('aside.sidebar');
                 var hamburger = document.getElementById('hamburger-menu');
                 if (sidebar && hamburger) {
@@ -11780,12 +11298,10 @@ unset($_SESSION['last_sale_id']); ?>";
                         });
                     });
                 }
-
                 var observer = new MutationObserver(function () {
                     applyResponsiveTableLabels(document);
                 });
                 observer.observe(document.body, { childList: true, subtree: true });
-
                 var contactForm = document.getElementById('contact-message-form');
                 if (contactForm) {
                     contactForm.addEventListener('submit', function (event) {
@@ -11796,13 +11312,11 @@ unset($_SESSION['last_sale_id']); ?>";
                         contactForm.reset();
                     });
                 }
-
                 document.addEventListener('keydown', function (event) {
                     if (event.key === 'Escape') {
                         closeSidebar();
                     }
                 });
-
                 window.addEventListener('resize', syncSidebarState);
                 syncSidebarState();
             });
@@ -11962,7 +11476,6 @@ unset($_SESSION['last_sale_id']); ?>";
                 if (copiesStr === null) return;
                 let copies = parseInt(copiesStr);
                 if (isNaN(copies) || copies < 1) copies = 1;
-
                 const popup = window.open('', '_blank', 'width=800,height=900');
                 if (!popup) {
                     showAppToast('Please allow popups to print barcode labels.', 'warning');
@@ -11987,11 +11500,9 @@ unset($_SESSION['last_sale_id']); ?>";
                         .b-price { font-size: 14px; margin-top: 5px; font-weight: bold; }
                     </style>
                     </head><body>`;
-
                 let pages = Math.ceil(copies / 18);
                 let printed = 0;
                 let displayPrice = payload.retail_price || payload.price || 0;
-                
                 for(let p = 0; p < pages; p++) {
                     htmlContent += `<div class="page">`;
                     for(let i = 0; i < 18 && printed < copies; i++) {
@@ -12004,7 +11515,6 @@ unset($_SESSION['last_sale_id']); ?>";
                     }
                     htmlContent += `</div>`;
                 }
-                
                 htmlContent += `<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"><\/script>
                     <script>
                         window.onload = function() {
@@ -12016,7 +11526,6 @@ unset($_SESSION['last_sale_id']); ?>";
                             setTimeout(() => { window.print(); }, 800);
                         }
                     <\/script></body></html>`;
-
                 popup.document.write(htmlContent);
                 popup.document.close();
             }
@@ -12435,7 +11944,5 @@ unset($_SESSION['last_sale_id']); ?>";
             });
         })();
     </script>
-
 </body>
-
 </html>
