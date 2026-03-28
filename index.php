@@ -1494,7 +1494,7 @@ if (isset($_GET['action'])) {
                 $stmt_update_stock->close();
 
                 $conn->commit();
-                echo json_encode(['success' => true, 'message' => 'Quick sale completed for ' . $qty . 'x ' . html($book_data['name'])]);
+                echo json_encode(['success' => true, 'message' => 'Quick sale completed for ' . $qty . 'x ' . html($book_data['name']), 'sale_id' => $sale_id]);
             } catch (Exception $e) {
                 $conn->rollback();
                 echo json_encode(['success' => false, 'message' => 'Quick sale failed: ' . $e->getMessage()]);
@@ -8748,12 +8748,11 @@ if ($settings_result) {
                     <hr style="border: 1px dashed var(--border-color); margin: 10px 0;">
                     <p style="text-align: center; margin-top: 15px;">Thank you for your purchase!</p>
                 </div>
-                <div class="form-actions" style="margin-top: 20px;">
+                <div class="form-actions" style="margin-top: 20px; flex-wrap: wrap; gap: 10px; justify-content: flex-end;">
                     <button type="button" class="btn btn-secondary modal-close">Close</button>
-                    <button type="button" class="btn btn-info" id="print-receipt-btn"><i class="fas fa-print"></i>
-                        Print</button>
-                    <button type="button" class="btn btn-success" id="download-receipt-btn"><i class="fas fa-download"></i>
-                        Download PDF</button>
+                    <button type="button" class="btn btn-primary" onclick="printReceipt('a4')"><i class="fas fa-file-alt"></i> Print A4</button>
+                    <button type="button" class="btn btn-info" onclick="printReceipt('thermal')"><i class="fas fa-receipt"></i> Print Thermal</button>
+                    <button type="button" class="btn btn-success" id="download-receipt-btn"><i class="fas fa-download"></i> PDF</button>
                 </div>
             </div>
         </div>
@@ -9777,6 +9776,12 @@ if ($settings_result) {
                 showToast(data.message, 'success');
                 if (typeof renderBooks === 'function') renderBooks();
                 if (typeof updateDashboard === 'function') updateDashboard();
+                if (data.sale_id) {
+                    const saleData = await fetchJSON(`index.php?action=get_sale_details_json&sale_id=${data.sale_id}`);
+                    if (saleData.success && saleData.sale) {
+                        openReceiptModal(saleData.sale);
+                    }
+                }
             } else {
                 showToast(data.message || 'Quick sale failed.', 'error');
             }
@@ -10464,8 +10469,10 @@ if ($settings_result) {
                 showToast('Sale record not found.', 'error');
             }
         }
+        let currentReceiptSale = null;
         async function openReceiptModal(sale) {
             if (!elements.receiptModal) return;
+            currentReceiptSale = sale;
             elements.receiptSaleId.textContent = html(sale.id);
             elements.receiptDate.textContent = formatDate(html(sale.sale_date));
             elements.receiptCustomer.textContent = html(sale.customer_name || 'Guest');
@@ -10487,36 +10494,128 @@ if ($settings_result) {
             `).join('');
             showModal(elements.receiptModal);
         }
-        async function printReceipt() {
-            if (!elements.receiptContent) return;
-            const receiptContent = document.getElementById('receipt-content').cloneNode(true);
-            receiptContent.style.padding = '20px';
-            receiptContent.style.backgroundColor = 'white';
-            receiptContent.style.color = 'black';
-            receiptContent.style.position = 'absolute';
-            receiptContent.style.left = '-9999px';
-            document.body.appendChild(receiptContent);
-            html2canvas(receiptContent, {
-                scale: 2
-            }).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
-                const {
-                    jsPDF
-                } = window.jspdf;
-                const pdf = new jsPDF({
-                    orientation: 'portrait',
-                    unit: 'px',
-                    format: [canvas.width, canvas.height]
-                });
-                pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
-                pdf.autoPrint();
-                window.open(pdf.output('bloburl'), '_blank');
-            }).catch(error => {
-                console.error('Error generating PDF for print:', error);
-                showToast('Failed to generate printable receipt.', 'error');
-            }).finally(() => {
-                receiptContent.remove();
-            });
+        function printReceipt(type) {
+            if (!currentReceiptSale) return;
+            const sale = currentReceiptSale;
+            const storeName = "<?php echo html($public_settings['system_name'] ?? 'General Store & Bookshop'); ?>";
+            const storeAddress = "<?php echo html(str_replace(["\r", "\n", '"'], [' ', ' ', '\"'], $public_settings['address'] ?? '')); ?>";
+            const storePhone = "<?php echo html($public_settings['phone'] ?? ''); ?>";
+            const currency = "<?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?>";
+            
+            const dateStr = formatDate(sale.sale_date);
+            let htmlContent = '';
+            
+            if (type === 'thermal') {
+                htmlContent = `
+                    <html><head><title>Thermal Receipt</title>
+                    <style>
+                        @page { margin: 0; }
+                        body { font-family: 'Courier New', Courier, monospace; width: 80mm; margin: 0 auto; padding: 5mm; font-size: 12px; color: #000; box-sizing: border-box; }
+                        .text-center { text-align: center; }
+                        .text-right { text-align: right; }
+                        table { width: 100%; border-collapse: collapse; margin: 10px 0; table-layout: fixed; }
+                        th, td { padding: 4px 0; border-bottom: 1px dashed #000; vertical-align: top; word-wrap: break-word; }
+                        th { border-top: 1px dashed #000; border-bottom: 1px dashed #000; text-align: left; font-weight: bold; }
+                        .bold { font-weight: bold; }
+                        .mb-1 { margin-bottom: 5px; }
+                        .mb-2 { margin-bottom: 10px; }
+                    </style>
+                    </head><body>
+                        <div class="text-center mb-2">
+                            <h2 style="margin:0 0 5px 0; font-size: 16px;">${storeName}</h2>
+                            <div class="mb-1">${storeAddress}</div>
+                            <div class="mb-1">Tel: ${storePhone}</div>
+                        </div>
+                        <div class="mb-1"><strong>Sale ID:</strong> ${sale.id}</div>
+                        <div class="mb-1"><strong>Date:</strong> ${dateStr}</div>
+                        <div class="mb-2"><strong>Customer:</strong> ${sale.customer_name || 'Guest'}</div>
+                        
+                        <table>
+                            <thead><tr><th style="width:40%;">Item</th><th class="text-right" style="width:15%;">Qty</th><th class="text-right" style="width:20%;">Price</th><th class="text-right" style="width:25%;">Total</th></tr></thead>
+                            <tbody>
+                                ${sale.items.map(item => `
+                                    <tr>
+                                        <td>${item.name}</td>
+                                        <td class="text-right">${item.quantity}</td>
+                                        <td class="text-right">${Number(item.price_per_unit).toFixed(2)}</td>
+                                        <td class="text-right">${(Number(item.price_per_unit)*item.quantity - Number(item.discount_per_unit)*item.quantity).toFixed(2)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                        <div class="text-right mb-1">Subtotal: ${currency}${Number(sale.subtotal).toFixed(2)}</div>
+                        ${Number(sale.discount) > 0 ? `<div class="text-right mb-1">Discount: ${currency}${Number(sale.discount).toFixed(2)}</div>` : ''}
+                        <div class="text-right bold mb-2" style="font-size: 16px;">Total: ${currency}${Number(sale.total).toFixed(2)}</div>
+                        <div class="text-center mb-2" style="margin-top:20px; font-size:14px;">*** Thank You! ***</div>
+                        <script>window.onload = function() { setTimeout(function(){ window.print(); }, 500); }<\/script>
+                    </body></html>
+                `;
+            } else {
+                htmlContent = `
+                    <html><head><title>A4 Invoice</title>
+                    <style>
+                        @page { size: A4; margin: 20mm; }
+                        body { font-family: Arial, sans-serif; margin: 0; padding: 0; color: #333; background: #fff; }
+                        .invoice-box { width: 100%; max-width: 190mm; margin: 0 auto; box-sizing: border-box; }
+                        .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #2a9d8f; padding-bottom: 20px; margin-bottom: 20px; }
+                        .header h1 { margin: 0; color: #2a9d8f; font-size: 28px; text-transform: uppercase; letter-spacing: 2px; }
+                        .store-info { text-align: right; color: #555; line-height: 1.5; font-size: 14px; }
+                        .invoice-details { display: flex; justify-content: space-between; margin-bottom: 30px; font-size: 14px; }
+                        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                        th { background: #f8f9fa; color: #333; padding: 12px; text-align: left; border-bottom: 2px solid #dee2e6; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                        td { padding: 12px; border-bottom: 1px solid #eee; }
+                        .text-right { text-align: right; }
+                        .totals { width: 50%; float: right; margin-top: 10px; }
+                        .totals table { width: 100%; border: none; }
+                        .totals th { background: transparent; border: none; padding: 8px; text-align: right; color: #555; }
+                        .totals td { border: none; padding: 8px; font-weight: bold; font-size: 16px; }
+                        .clearfix::after { content: ""; clear: both; display: table; }
+                        .footer { text-align: center; margin-top: 50px; color: #777; font-size: 12px; border-top: 1px solid #eee; padding-top: 20px; }
+                    </style>
+                    </head><body>
+                        <div class="invoice-box">
+                            <div class="header">
+                                <div><h1>INVOICE</h1><br><h2 style="margin:0; color:#333;">${storeName}</h2></div>
+                                <div class="store-info">${storeAddress}<br>Tel: ${storePhone}</div>
+                            </div>
+                            <div class="invoice-details">
+                                <div><strong style="color:#777;">Invoice To:</strong><br><span style="font-size:16px;">${sale.customer_name || 'Guest Customer'}</span></div>
+                                <div class="text-right"><strong style="color:#777;">Invoice #:</strong> ${sale.id}<br><strong style="color:#777;">Date:</strong> ${dateStr}</div>
+                            </div>
+                            <table>
+                                <thead><tr><th>Description</th><th class="text-right">Rate</th><th class="text-right">Qty</th><th class="text-right">Amount</th></tr></thead>
+                                <tbody>
+                                    ${sale.items.map(item => `
+                                        <tr>
+                                            <td>${item.name}</td>
+                                            <td class="text-right">${currency}${Number(item.price_per_unit).toFixed(2)}</td>
+                                            <td class="text-right">${item.quantity}</td>
+                                            <td class="text-right">${currency}${(Number(item.price_per_unit)*item.quantity - Number(item.discount_per_unit)*item.quantity).toFixed(2)}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                            <div class="totals clearfix">
+                                <table>
+                                    <tr><th>Subtotal:</th><td class="text-right">${currency}${Number(sale.subtotal).toFixed(2)}</td></tr>
+                                    ${Number(sale.discount) > 0 ? `<tr><th>Discount:</th><td class="text-right">-${currency}${Number(sale.discount).toFixed(2)}</td></tr>` : ''}
+                                    <tr><th style="font-size:18px; color:#2a9d8f;">Grand Total:</th><td class="text-right" style="font-size:18px; color:#2a9d8f;">${currency}${Number(sale.total).toFixed(2)}</td></tr>
+                                </table>
+                            </div>
+                            <div class="footer">Thank you for shopping with us!</div>
+                        </div>
+                        <script>window.onload = function() { setTimeout(function(){ window.print(); }, 500); }<\/script>
+                    </body></html>
+                `;
+            }
+            
+            const printWin = window.open('', '_blank');
+            if(printWin) {
+                printWin.document.write(htmlContent);
+                printWin.document.close();
+            } else {
+                showToast('Please allow popups to print receipts.', 'warning');
+            }
         }
         async function downloadReceiptPdf() {
             if (!elements.receiptContent) return;
@@ -11274,7 +11373,6 @@ if ($settings_result) {
                 renderSalesHistory();
             });
             if (elements.exportSalesBtn) elements.exportSalesBtn.addEventListener('click', exportSales);
-            if (elements.printReceiptBtn) elements.printReceiptBtn.addEventListener('click', printReceipt);
             if (elements.downloadReceiptBtn) elements.downloadReceiptBtn.addEventListener('click', downloadReceiptPdf);
             if (elements.addPromotionBtn) elements.addPromotionBtn.addEventListener('click', () => openPromotionModal());
             if (elements.promotionTypePercentage) elements.promotionTypePercentage.addEventListener('click', () => {
@@ -11510,7 +11608,8 @@ unset($_SESSION['last_sale_id']); ?>";
             if (currentPage === 'books-public' || currentPage === 'home') {
                 await renderPublicBooks();
             }
-            if (window.location.hash) {
+            async function openGlobalSearchTarget() {
+                if (!window.location.hash) return;
                 const hash = window.location.hash;
                 if (hash.startsWith('#edit-')) {
                     const id = hash.split('-')[1];
@@ -11534,6 +11633,12 @@ unset($_SESSION['last_sale_id']); ?>";
                     }
                 }
             }
+
+            await openGlobalSearchTarget();
+
+            window.addEventListener('hashchange', function () {
+                openGlobalSearchTarget();
+            });
         });
     </script>
 
