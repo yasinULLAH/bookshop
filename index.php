@@ -211,7 +211,7 @@ if (isset($_GET['action'])) {
             $book_id = $_GET['book_id'] ?? null;
             $page = $_GET['page_num'] ?? 1;
             $search = $_GET['search'] ?? '';
-            $sort = $_GET['sort'] ?? 'name-asc';
+            $sort = $_GET['sort'] ?? 'popular';
             $limit = $_GET['limit'] ?? 10;
             $offset = ($page - 1) * $limit;
             $where_clauses = [];
@@ -230,6 +230,9 @@ if (isset($_GET['action'])) {
             }
             $order_by = '';
             switch ($sort) {
+                case 'popular':
+                    $order_by = 'total_sold DESC, name ASC';
+                    break;
                 case 'name-asc':
                     $order_by = 'name ASC';
                     break;
@@ -279,7 +282,7 @@ if (isset($_GET['action'])) {
             $search = $_GET['search'] ?? '';
             $category = $_GET['category'] ?? 'all';
             $product_type = $_GET['product_type'] ?? 'all';
-            $sort = $_GET['sort'] ?? 'name-asc';
+            $sort = $_GET['sort'] ?? 'popular';
             $limit = $_GET['limit'] ?? 12;
             $offset = ($page - 1) * $limit;
             $where_clauses = ['stock > 0'];
@@ -303,6 +306,9 @@ if (isset($_GET['action'])) {
             }
             $order_by = '';
             switch ($sort) {
+                case 'popular':
+                    $order_by = 'total_sold DESC, name ASC';
+                    break;
                 case 'name-asc':
                     $order_by = 'name ASC';
                     break;
@@ -324,7 +330,7 @@ if (isset($_GET['action'])) {
             $stmt->execute();
             $total_items = $stmt->get_result()->fetch_assoc()['total'];
             $stmt->close();
-            $sql = "SELECT id, name, author, category, isbn, barcode, price, COALESCE(retail_price, price) AS retail_price, COALESCE(wholesale_price, price) AS wholesale_price, stock, description, cover_image, product_type FROM books $where_sql ORDER BY $order_by LIMIT ? OFFSET ?";
+            $sql = "SELECT id, name, author, category, isbn, barcode, price, COALESCE(retail_price, price) AS retail_price, COALESCE(wholesale_price, price) AS wholesale_price, stock, description, cover_image, product_type, (SELECT IFNULL(SUM(quantity), 0) FROM sale_items WHERE book_id = books.id) AS total_sold FROM books $where_sql ORDER BY $order_by LIMIT ? OFFSET ?";
             $stmt = $conn->prepare($sql);
             if ($types) {
                 $all_params = array_merge($params, [$limit, $offset]);
@@ -522,7 +528,7 @@ if (isset($_GET['action'])) {
             $stmt->execute();
             $total_items = $stmt->get_result()->fetch_assoc()['total'];
             $stmt->close();
-            $sql = "SELECT id, name, author, barcode, price, COALESCE(retail_price, price) AS retail_price, COALESCE(wholesale_price, price) AS wholesale_price, stock, category, product_type FROM books $where_sql ORDER BY name ASC LIMIT ? OFFSET ?";
+            $sql = "SELECT id, name, author, barcode, price, COALESCE(retail_price, price) AS retail_price, COALESCE(wholesale_price, price) AS wholesale_price, stock, category, product_type, (SELECT IFNULL(SUM(quantity), 0) FROM sale_items WHERE book_id = books.id) AS total_sold FROM books $where_sql ORDER BY total_sold DESC, name ASC LIMIT ? OFFSET ?";
             $stmt = $conn->prepare($sql);
             if ($types) {
                 $all_params = array_merge($params, [$limit, $offset]);
@@ -1418,7 +1424,7 @@ if (isset($_GET['action'])) {
                 $types .= 's';
             }
             $whereSql = 'WHERE ' . implode(' AND ', $where);
-            $stmt = $conn->prepare("SELECT id, name, author, category, product_type, barcode, stock, price, COALESCE(retail_price, price) AS retail_price, COALESCE(wholesale_price, price) AS wholesale_price FROM books {$whereSql} ORDER BY name ASC LIMIT 150");
+            $stmt = $conn->prepare("SELECT id, name, author, category, product_type, barcode, stock, price, COALESCE(retail_price, price) AS retail_price, COALESCE(wholesale_price, price) AS wholesale_price, cover_image, (SELECT IFNULL(SUM(quantity), 0) FROM sale_items WHERE book_id = books.id) AS total_sold FROM books {$whereSql} ORDER BY total_sold DESC, name ASC LIMIT 150");
             if ($types) {
                 $stmt->bind_param($types, ...$params);
             }
@@ -6123,6 +6129,7 @@ if ($settings_result) {
                                 <div class="form-group">
                                     <label for="public-book-sort">Sort By</label>
                                     <select id="public-book-sort">
+                                        <option value="popular">Top Selling</option>
                                         <option value="name-asc">Name (A-Z)</option>
                                         <option value="name-desc">Name (Z-A)</option>
                                         <option value="price-asc">Price (Low to High)</option>
@@ -9668,7 +9675,7 @@ if ($settings_result) {
                 const search = elements.publicBookSearch ? elements.publicBookSearch.value : '';
                 const category = elements.publicBookCategoryFilter ? elements.publicBookCategoryFilter.value : 'all';
                 const product_type = elements.publicProductTypeFilter ? elements.publicProductTypeFilter.value : 'all';
-                const sort = elements.publicBookSort ? elements.publicBookSort.value : 'name-asc';
+                const sort = elements.publicBookSort ? elements.publicBookSort.value : 'popular';
                 const page = paginationConfig.currentPage;
                 const data = await fetchJSON(`index.php?action=get_public_books_json&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}&product_type=${encodeURIComponent(product_type)}&sort=${sort}&page_num=${page}`);
                 if (data.success) {
@@ -9711,9 +9718,11 @@ if ($settings_result) {
                         const inCartQuantity = currentCart.find(item => item.bookId === product.id)?.quantity || 0;
                         const availableStock = product.stock - inCartQuantity;
                         const outOfStock = availableStock <= 0;
+                        const imgSrc = product.cover_image ? html(product.cover_image) : 'https://via.placeholder.com/150x90?text=No+Image';
                         return `
                             <div class="pos-card ${outOfStock ? 'disabled' : ''}" onclick="if(!${outOfStock}) addToCart(${html(product.id)}, '${html(product.name.replace(/'/g, "\\'"))}', ${html(product.price)}, false)" style="${outOfStock ? 'opacity:0.5; cursor:not-allowed;' : ''}">
                                 <div class="stock-badge" style="background:${outOfStock ? 'var(--danger-color)' : 'var(--primary-color)'}">${outOfStock ? 'Out' : availableStock}</div>
+                                <img src="${imgSrc}" alt="${html(product.name)}" loading="lazy">
                                 <div class="title" title="${html(product.name)}">${html(product.name)}</div>
                                 <div class="price">${formatCurrency(product.price)}</div>
                             </div>
@@ -10694,7 +10703,7 @@ if ($settings_result) {
             const search = elements.publicBookSearch ? elements.publicBookSearch.value : '';
             const category = elements.publicBookCategoryFilter ? elements.publicBookCategoryFilter.value : 'all';
             const product_type = elements.publicProductTypeFilter ? elements.publicProductTypeFilter.value : 'all';
-            const sort = elements.publicBookSort ? elements.publicBookSort.value : 'name-asc';
+            const sort = elements.publicBookSort ? elements.publicBookSort.value : 'popular';
             const page = pagination.publicBooks.currentPage;
             const data = await fetchJSON(`index.php?action=get_public_books_json&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}&product_type=${encodeURIComponent(product_type)}&sort=${sort}&page_num=${page}`);
             if (data.success) {
