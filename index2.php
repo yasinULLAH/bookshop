@@ -11,176 +11,70 @@ if (!is_dir(UPLOAD_DIR)) {
 }
 $conn = new mysqli(DB_SERVER, DB_USERNAME, DB_PASSWORD, DB_NAME);
 if ($conn->connect_error) {
-    die('Connection failed: ' . $conn->connect_error);
+    die("Connection failed: " . $conn->connect_error);
 }
-$conn->set_charset('utf8mb4');
-
-function table_exists($conn, $table)
-{
-    $table = $conn->real_escape_string($table);
-    $result = $conn->query("SHOW TABLES LIKE '{$table}'");
-    return $result && $result->num_rows > 0;
-}
-
-function column_exists($conn, $table, $column)
-{
-    $table = $conn->real_escape_string($table);
-    $column = $conn->real_escape_string($column);
-    $result = $conn->query("SHOW COLUMNS FROM `{$table}` LIKE '{$column}'");
-    return $result && $result->num_rows > 0;
-}
-
-function ensure_runtime_schema($conn)
-{
-    if (table_exists($conn, 'books')) {
-        if (!column_exists($conn, 'books', 'barcode')) {
-            $conn->query('ALTER TABLE books ADD COLUMN barcode VARCHAR(120) NULL AFTER isbn');
-            $conn->query('ALTER TABLE books ADD INDEX idx_books_barcode (barcode)');
-        }
-        if (!column_exists($conn, 'books', 'retail_price')) {
-            $conn->query('ALTER TABLE books ADD COLUMN retail_price DECIMAL(12,2) NULL AFTER price');
-        }
-        if (!column_exists($conn, 'books', 'wholesale_price')) {
-            $conn->query('ALTER TABLE books ADD COLUMN wholesale_price DECIMAL(12,2) NULL AFTER retail_price');
-        }
-        if (!column_exists($conn, 'books', 'purchase_price')) {
-            $conn->query('ALTER TABLE books ADD COLUMN purchase_price DECIMAL(12,2) NULL AFTER price');
-        }
-        $conn->query('UPDATE books SET retail_price = price WHERE retail_price IS NULL OR retail_price = 0');
-        $conn->query('UPDATE books SET wholesale_price = price WHERE wholesale_price IS NULL OR wholesale_price = 0');
-        $conn->query("UPDATE books SET barcode = REPLACE(isbn, '-', '') WHERE (barcode IS NULL OR barcode = '') AND isbn IS NOT NULL AND isbn <> ''");
-    }
-    $conn->query("CREATE TABLE IF NOT EXISTS public_sale_links (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        token VARCHAR(120) NOT NULL UNIQUE,
-        link_name VARCHAR(190) NOT NULL,
-        password_hash VARCHAR(255) NOT NULL,
-        price_mode ENUM('retail','wholesale') NOT NULL DEFAULT 'retail',
-        created_by INT NULL,
-        notes TEXT NULL,
-        is_active TINYINT(1) NOT NULL DEFAULT 1,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-}
-
-ensure_runtime_schema($conn);
+$conn->set_charset("utf8mb4");
 $currency_symbol = 'PKR ';
 $settings = [];
-$settings_result = $conn->query('SELECT setting_key, setting_value FROM settings');
+$settings_result = $conn->query("SELECT setting_key, setting_value FROM settings");
 if ($settings_result) {
     while ($row = $settings_result->fetch_assoc()) {
         $settings[$row['setting_key']] = $row['setting_value'];
     }
     $currency_symbol = html($settings['currency_symbol'] ?? 'PKR ');
 }
-
 function html($text)
 {
     return htmlspecialchars($text ?? '', ENT_QUOTES, 'UTF-8');
 }
-
 function redirect($page, $params = [])
 {
     $queryString = http_build_query($params);
-    header("Location: index.php?page=$page" . ($queryString ? "&$queryString" : ''));
+    header("Location: index.php?page=$page" . ($queryString ? "&$queryString" : ""));
     exit();
 }
-
 function isAdmin()
 {
     return isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'admin';
 }
-
-function hasAccess($page)
-{
-    if (isset($_SESSION['permissions']) && is_array($_SESSION['permissions'])) {
-        return in_array($page, $_SESSION['permissions']);
-    }
-    if (isAdmin())
-        return true;
-    if (isStaff() && in_array($page, ['dashboard', 'books', 'cart', 'sales-history', 'online-orders', 'customers']))
-        return true;
-    return false;
-}
-
 function isCustomer()
 {
     return isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'customer';
 }
-
 function isStaff()
 {
     return isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'staff';
 }
-
 function isLoggedIn()
 {
     return isset($_SESSION['user_id']) || isset($_SESSION['customer_id']);
 }
-
 function generate_uuid()
 {
     return sprintf(
         '%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
-        mt_rand(0, 0xFFFF),
-        mt_rand(0, 0xFFFF),
-        mt_rand(0, 0xFFFF),
-        mt_rand(0, 0xFFF) | 0x4000,
-        mt_rand(0, 0x3FFF) | 0x8000,
-        mt_rand(0, 0xFFFF),
-        mt_rand(0, 0xFFFF),
-        mt_rand(0, 0xFFFF)
+        mt_rand(0, 0xffff),
+        mt_rand(0, 0xffff),
+        mt_rand(0, 0xffff),
+        mt_rand(0, 0x0fff) | 0x4000,
+        mt_rand(0, 0x3fff) | 0x8000,
+        mt_rand(0, 0xffff),
+        mt_rand(0, 0xffff),
+        mt_rand(0, 0xffff)
     );
 }
-
 function format_currency($amount)
 {
     global $currency_symbol;
     return $currency_symbol . number_format($amount, 2);
 }
-
 function format_date($timestamp)
 {
     return date('M d, Y h:i A', is_numeric($timestamp) ? $timestamp : strtotime($timestamp));
 }
-
 function format_short_date($timestamp)
 {
     return date('Y-m-d', is_numeric($timestamp) ? $timestamp : strtotime($timestamp));
-}
-
-function has_public_sale_access($token)
-{
-    if (empty($token) || empty($_SESSION['public_sale_access'][$token]['granted_at'])) {
-        return false;
-    }
-    $grantedAt = (int) $_SESSION['public_sale_access'][$token]['granted_at'];
-    if ((time() - $grantedAt) > (8 * 60 * 60)) {
-        unset($_SESSION['public_sale_access'][$token]);
-        return false;
-    }
-    return true;
-}
-
-function current_public_sale_link($conn, $token)
-{
-    if (empty($token)) {
-        return null;
-    }
-    $stmt = $conn->prepare('SELECT * FROM public_sale_links WHERE token = ? AND is_active = 1 LIMIT 1');
-    $stmt->bind_param('s', $token);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $row = $result ? $result->fetch_assoc() : null;
-    $stmt->close();
-    return $row ?: null;
-}
-
-if (isset($_SESSION['auth_started_at']) && (time() - (int) $_SESSION['auth_started_at']) > (8 * 60 * 60)) {
-    session_destroy();
-    session_start();
-    $_SESSION['toast'] = ['type' => 'info', 'message' => 'Your session expired after 8 hours. Please log in again.'];
 }
 if (isset($_GET['action'])) {
     if ($_GET['action'] === 'logout') {
@@ -189,7 +83,7 @@ if (isset($_GET['action'])) {
         $_SESSION['toast'] = ['type' => 'info', 'message' => 'You have been logged out.'];
         redirect('login');
     }
-    if (in_array($_GET['action'], ['get_public_books_json', 'get_online_order_status', 'get_book_by_barcode_json', 'get_sidebar_products_json', 'get_sale_details_json'])) {
+    if (in_array($_GET['action'], ['get_public_books_json', 'get_online_order_status'])) {
     } elseif (!isLoggedIn()) {
         echo json_encode(['success' => false, 'message' => 'Unauthorized']);
         exit();
@@ -218,15 +112,15 @@ if (isset($_GET['action'])) {
             $params = [];
             $types = '';
             if ($book_id) {
-                $where_clauses[] = 'id = ?';
+                $where_clauses[] = "id = ?";
                 $params[] = $book_id;
                 $types .= 'i';
             }
             if ($search) {
                 $search_term = '%' . $search . '%';
-                $where_clauses[] = '(name LIKE ? OR author LIKE ? OR isbn LIKE ? OR barcode LIKE ? OR category LIKE ?)';
-                $params = array_merge($params, [$search_term, $search_term, $search_term, $search_term, $search_term]);
-                $types .= 'sssss';
+                $where_clauses[] = "(name LIKE ? OR author LIKE ? OR isbn LIKE ? OR category LIKE ?)";
+                $params = array_merge($params, [$search_term, $search_term, $search_term, $search_term]);
+                $types .= 'ssss';
             }
             $order_by = '';
             switch ($sort) {
@@ -282,22 +176,22 @@ if (isset($_GET['action'])) {
             $sort = $_GET['sort'] ?? 'name-asc';
             $limit = $_GET['limit'] ?? 12;
             $offset = ($page - 1) * $limit;
-            $where_clauses = ['stock > 0'];
+            $where_clauses = ["stock > 0"];
             $params = [];
             $types = '';
             if ($search) {
                 $search_term = '%' . $search . '%';
-                $where_clauses[] = '(name LIKE ? OR author LIKE ? OR isbn LIKE ? OR barcode LIKE ? OR description LIKE ?)';
-                $params = array_merge($params, [$search_term, $search_term, $search_term, $search_term, $search_term]);
-                $types .= 'sssss';
+                $where_clauses[] = "(name LIKE ? OR author LIKE ? OR isbn LIKE ? OR description LIKE ?)";
+                $params = array_merge($params, [$search_term, $search_term, $search_term, $search_term]);
+                $types .= 'ssss';
             }
             if ($category !== 'all') {
-                $where_clauses[] = 'category = ?';
+                $where_clauses[] = "category = ?";
                 $params[] = $category;
                 $types .= 's';
             }
             if ($product_type !== 'all') {
-                $where_clauses[] = 'product_type = ?';
+                $where_clauses[] = "product_type = ?";
                 $params[] = $product_type;
                 $types .= 's';
             }
@@ -324,7 +218,7 @@ if (isset($_GET['action'])) {
             $stmt->execute();
             $total_items = $stmt->get_result()->fetch_assoc()['total'];
             $stmt->close();
-            $sql = "SELECT id, name, author, category, isbn, barcode, price, COALESCE(retail_price, price) AS retail_price, COALESCE(wholesale_price, price) AS wholesale_price, stock, description, cover_image, product_type FROM books $where_sql ORDER BY $order_by LIMIT ? OFFSET ?";
+            $sql = "SELECT id, name, author, category, isbn, price, stock, description, cover_image, product_type FROM books $where_sql ORDER BY $order_by LIMIT ? OFFSET ?";
             $stmt = $conn->prepare($sql);
             if ($types) {
                 $all_params = array_merge($params, [$limit, $offset]);
@@ -352,18 +246,18 @@ if (isset($_GET['action'])) {
             $params = [];
             $types = '';
             if ($customer_id) {
-                $where_clauses[] = 'id = ?';
+                $where_clauses[] = "id = ?";
                 $params[] = $customer_id;
                 $types .= 'i';
             }
             if ($search) {
                 $search_term = '%' . $search . '%';
-                $where_clauses[] = '(name LIKE ? OR email LIKE ? OR phone LIKE ?)';
-                $params = array_merge($params, [$search_term, $search_term, $search_term, $search_term]);
-                $types .= 'ssss';
+                $where_clauses[] = "(name LIKE ? OR email LIKE ? OR phone LIKE ?)";
+                $params = array_merge($params, [$search_term, $search_term, $search_term]);
+                $types .= 'sss';
             }
             if ($status !== 'all') {
-                $where_clauses[] = 'is_active = ?';
+                $where_clauses[] = "is_active = ?";
                 $params[] = ($status === 'active' ? 1 : 0);
                 $types .= 'i';
             }
@@ -402,13 +296,13 @@ if (isset($_GET['action'])) {
             $params = [];
             $types = '';
             if ($supplier_id) {
-                $where_clauses[] = 'id = ?';
+                $where_clauses[] = "id = ?";
                 $params[] = $supplier_id;
                 $types .= 'i';
             }
             if ($search) {
                 $search_term = '%' . $search . '%';
-                $where_clauses[] = '(name LIKE ? OR contact_person LIKE ? OR email LIKE ? OR phone LIKE ?)';
+                $where_clauses[] = "(name LIKE ? OR contact_person LIKE ? OR email LIKE ? OR phone LIKE ?)";
                 $params = array_merge($params, [$search_term, $search_term, $search_term, $search_term]);
                 $types .= 'ssss';
             }
@@ -448,18 +342,18 @@ if (isset($_GET['action'])) {
             $params = [];
             $types = '';
             if ($po_id) {
-                $where_clauses[] = 'po.id = ?';
+                $where_clauses[] = "po.id = ?";
                 $params[] = $po_id;
                 $types .= 'i';
             }
             if ($search) {
                 $search_term = '%' . $search . '%';
-                $where_clauses[] = '(po.id LIKE ? OR s.name LIKE ? OR po.status LIKE ?)';
+                $where_clauses[] = "(po.id LIKE ? OR s.name LIKE ? OR po.status LIKE ?)";
                 $params = array_merge($params, [$search_term, $search_term, $search_term]);
                 $types .= 'sss';
             }
             if ($status !== 'all') {
-                $where_clauses[] = 'po.status = ?';
+                $where_clauses[] = "po.status = ?";
                 $params[] = $status;
                 $types .= 's';
             }
@@ -486,7 +380,7 @@ if (isset($_GET['action'])) {
             $result = $stmt->get_result();
             $purchase_orders = [];
             while ($row = $result->fetch_assoc()) {
-                $po_items_stmt = $conn->prepare('SELECT poi.*, b.name FROM po_items poi JOIN books b ON poi.book_id = b.id WHERE poi.po_id = ?');
+                $po_items_stmt = $conn->prepare("SELECT poi.*, b.name FROM po_items poi JOIN books b ON poi.book_id = b.id WHERE poi.po_id = ?");
                 $po_items_stmt->bind_param('i', $row['id']);
                 $po_items_stmt->execute();
                 $po_items_result = $po_items_stmt->get_result();
@@ -505,12 +399,12 @@ if (isset($_GET['action'])) {
             $search = $_GET['search'] ?? '';
             $limit = 10;
             $offset = ($page - 1) * $limit;
-            $where_clauses = ['stock > 0'];
+            $where_clauses = ["stock > 0"];
             $params = [];
             $types = '';
             if ($search) {
                 $search_term = '%' . $search . '%';
-                $where_clauses[] = '(name LIKE ? OR author LIKE ? OR isbn LIKE ? OR barcode LIKE ?)';
+                $where_clauses[] = "(name LIKE ? OR author LIKE ? OR isbn LIKE ?)";
                 $params = array_merge($params, [$search_term, $search_term, $search_term]);
                 $types .= 'sss';
             }
@@ -522,7 +416,7 @@ if (isset($_GET['action'])) {
             $stmt->execute();
             $total_items = $stmt->get_result()->fetch_assoc()['total'];
             $stmt->close();
-            $sql = "SELECT id, name, author, barcode, price, COALESCE(retail_price, price) AS retail_price, COALESCE(wholesale_price, price) AS wholesale_price, stock, category, product_type FROM books $where_sql ORDER BY name ASC LIMIT ? OFFSET ?";
+            $sql = "SELECT id, name, author, price, stock, category, product_type FROM books $where_sql ORDER BY name ASC LIMIT ? OFFSET ?";
             $stmt = $conn->prepare($sql);
             if ($types) {
                 $all_params = array_merge($params, [$limit, $offset]);
@@ -549,13 +443,13 @@ if (isset($_GET['action'])) {
             $types = '';
             if ($search) {
                 $search_term = '%' . $search . '%';
-                $where_clauses[] = '(s.id LIKE ? OR c.name LIKE ? OR b.name LIKE ?)';
+                $where_clauses[] = "(s.id LIKE ? OR c.name LIKE ? OR b.name LIKE ?)";
                 $params = array_merge($params, [$search_term, $search_term, $search_term]);
                 $types .= 'sss';
             }
             $where_sql = count($where_clauses) > 0 ? 'WHERE ' . implode(' AND ', $where_clauses) : '';
-            $join_sql = 'LEFT JOIN customers c ON s.customer_id = c.id LEFT JOIN sale_items si ON s.id = si.sale_id LEFT JOIN books b ON si.book_id = b.id';
-            $group_by = 'GROUP BY s.id';
+            $join_sql = "LEFT JOIN customers c ON s.customer_id = c.id LEFT JOIN sale_items si ON s.id = si.sale_id LEFT JOIN books b ON si.book_id = b.id";
+            $group_by = "GROUP BY s.id";
             $stmt = $conn->prepare("SELECT COUNT(DISTINCT s.id) AS total FROM sales s $join_sql $where_sql");
             if ($types) {
                 $stmt->bind_param($types, ...$params);
@@ -592,7 +486,7 @@ if (isset($_GET['action'])) {
                 exit();
             }
             $customer_id = $_SESSION['customer_id'];
-            $stmt = $conn->prepare('SELECT name, phone, email, address FROM customers WHERE id = ?');
+            $stmt = $conn->prepare("SELECT name, phone, email, address FROM customers WHERE id = ?");
             $stmt->bind_param('i', $customer_id);
             $stmt->execute();
             $customer = $stmt->get_result()->fetch_assoc();
@@ -604,22 +498,21 @@ if (isset($_GET['action'])) {
             }
             exit();
         case 'get_sale_details_json':
-            $public_token = trim($_GET['token'] ?? '');
-            if (!isAdmin() && !isStaff() && !has_public_sale_access($public_token)) {
+            if (!isAdmin() && !isStaff()) {
                 echo json_encode(['success' => false, 'message' => 'Unauthorized']);
                 exit();
             }
             $sale_id = $_GET['sale_id'] ?? '';
-            $stmt = $conn->prepare('SELECT s.*, c.name AS customer_name 
+            $stmt = $conn->prepare("SELECT s.*, c.name AS customer_name 
                                     FROM sales s 
                                     LEFT JOIN customers c ON s.customer_id = c.id 
-                                    WHERE s.id = ?');
+                                    WHERE s.id = ?");
             $stmt->bind_param('i', $sale_id);
             $stmt->execute();
             $sale = $stmt->get_result()->fetch_assoc();
             $stmt->close();
             if ($sale) {
-                $stmt_items = $conn->prepare('SELECT si.*, b.name FROM sale_items si JOIN books b ON si.book_id = b.id WHERE si.sale_id = ?');
+                $stmt_items = $conn->prepare("SELECT si.*, b.name FROM sale_items si JOIN books b ON si.book_id = b.id WHERE si.sale_id = ?");
                 $stmt_items->bind_param('i', $sale_id);
                 $stmt_items->execute();
                 $items = $stmt_items->get_result()->fetch_all(MYSQLI_ASSOC);
@@ -672,23 +565,23 @@ if (isset($_GET['action'])) {
             $params = [];
             $types = '';
             if (isCustomer()) {
-                $where_clauses[] = 'oo.customer_id = ?';
+                $where_clauses[] = "oo.customer_id = ?";
                 $params[] = $_SESSION['customer_id'];
                 $types .= 'i';
             }
             if ($order_id) {
-                $where_clauses[] = 'oo.id = ?';
+                $where_clauses[] = "oo.id = ?";
                 $params[] = $order_id;
                 $types .= 'i';
             }
             if ($search) {
                 $search_term = '%' . $search . '%';
-                $where_clauses[] = '(oo.id LIKE ? OR c.name LIKE ?)';
+                $where_clauses[] = "(oo.id LIKE ? OR c.name LIKE ?)";
                 $params = array_merge($params, [$search_term, $search_term]);
                 $types .= 'ss';
             }
             if ($status !== 'all') {
-                $where_clauses[] = 'oo.status = ?';
+                $where_clauses[] = "oo.status = ?";
                 $params[] = $status;
                 $types .= 's';
             }
@@ -712,7 +605,7 @@ if (isset($_GET['action'])) {
             $result = $stmt->get_result();
             $online_orders = [];
             while ($row = $result->fetch_assoc()) {
-                $order_items_stmt = $conn->prepare('SELECT ooi.*, b.name FROM online_order_items ooi JOIN books b ON ooi.book_id = b.id WHERE ooi.order_id = ?');
+                $order_items_stmt = $conn->prepare("SELECT ooi.*, b.name FROM online_order_items ooi JOIN books b ON ooi.book_id = b.id WHERE ooi.order_id = ?");
                 $order_items_stmt->bind_param('i', $row['id']);
                 $order_items_stmt->execute();
                 $order_items_result = $order_items_stmt->get_result();
@@ -736,7 +629,7 @@ if (isset($_GET['action'])) {
             $params = [];
             $types = '';
             if ($promotion_id) {
-                $where_clauses[] = 'p.id = ?';
+                $where_clauses[] = "p.id = ?";
                 $params[] = $promotion_id;
                 $types .= 'i';
             }
@@ -785,13 +678,13 @@ if (isset($_GET['action'])) {
             $params = [];
             $types = '';
             if ($expense_id) {
-                $where_clauses[] = 'id = ?';
+                $where_clauses[] = "id = ?";
                 $params[] = $expense_id;
                 $types .= 'i';
             }
             if ($search) {
                 $search_term = '%' . $search . '%';
-                $where_clauses[] = '(description LIKE ? OR category LIKE ?)';
+                $where_clauses[] = "(description LIKE ? OR category LIKE ?)";
                 $params = array_merge($params, [$search_term, $search_term]);
                 $types .= 'ss';
             }
@@ -842,7 +735,7 @@ if (isset($_GET['action'])) {
                 echo json_encode(['success' => false, 'message' => 'Unauthorized']);
                 exit();
             }
-            $stmt = $conn->prepare('SELECT * FROM settings');
+            $stmt = $conn->prepare("SELECT * FROM settings");
             $stmt->execute();
             $result = $stmt->get_result();
             $settings_data = [];
@@ -864,7 +757,7 @@ if (isset($_GET['action'])) {
                     $selected_date = $_GET['date'] ?? date('Y-m-d');
                     $start_of_day = $selected_date . ' 00:00:00';
                     $end_of_day = $selected_date . ' 23:59:59';
-                    $stmt = $conn->prepare('SELECT s.total, s.discount, si.quantity FROM sales s JOIN sale_items si ON s.id = si.sale_id WHERE s.sale_date BETWEEN ? AND ?');
+                    $stmt = $conn->prepare("SELECT s.total, s.discount, si.quantity FROM sales s JOIN sale_items si ON s.id = si.sale_id WHERE s.sale_date BETWEEN ? AND ?");
                     $stmt->bind_param('ss', $start_of_day, $end_of_day);
                     $stmt->execute();
                     $result = $stmt->get_result();
@@ -877,20 +770,20 @@ if (isset($_GET['action'])) {
                     $total_items_sold = array_sum(array_column($daily_sales, 'quantity'));
                     $total_discount_applied = array_sum(array_column($daily_sales, 'discount'));
                     $num_sales = count(array_unique(array_column($daily_sales, 'total')));
-                    $report_data['table_html'] = '
-                        <tr><td>Date</td><td>' . html($selected_date) . '</td><td></td></tr>
-                        <tr><td>Total Sales</td><td>' . format_currency($total_sales) . '</td><td></td></tr>
-                        <tr><td>Number of Sales</td><td>' . html($num_sales) . '</td><td></td></tr>
-                        <tr><td>Total Items Sold</td><td>' . html($total_items_sold) . '</td><td></td></tr>
-                        <tr><td>Total Discount Applied</td><td>' . format_currency($total_discount_applied) . '</td><td></td></tr>
-                    ';
+                    $report_data['table_html'] = "
+                        <tr><td>Date</td><td>" . html($selected_date) . "</td><td></td></tr>
+                        <tr><td>Total Sales</td><td>" . format_currency($total_sales) . "</td><td></td></tr>
+                        <tr><td>Number of Sales</td><td>" . html($num_sales) . "</td><td></td></tr>
+                        <tr><td>Total Items Sold</td><td>" . html($total_items_sold) . "</td><td></td></tr>
+                        <tr><td>Total Discount Applied</td><td>" . format_currency($total_discount_applied) . "</td><td></td></tr>
+                    ";
                     $report_data['chart_data'] = [
                         'labels' => ['Total Sales', 'Total Discount'],
                         'datasets' => [
                             ['label' => 'Amount', 'data' => [$total_sales, $total_discount_applied], 'backgroundColor' => ['#2a9d8f', '#f4a261'], 'borderColor' => ['#2a9d8f', '#f4a261'], 'borderWidth' => 1]
                         ],
                         'type' => 'bar',
-                        'title' => 'Daily Sales Report for ' . html($selected_date)
+                        'title' => "Daily Sales Report for " . html($selected_date)
                     ];
                     $report_data['raw_data'] = [
                         ['Metric' => 'Date', 'Value' => $selected_date],
@@ -902,20 +795,20 @@ if (isset($_GET['action'])) {
                     break;
                 case 'sales-weekly':
                     $selected_month_str = $_GET['month'] ?? date('Y-m');
-                    $year = (int) substr($selected_month_str, 0, 4);
-                    $month = (int) substr($selected_month_str, 5, 2);
+                    $year = (int)substr($selected_month_str, 0, 4);
+                    $month = (int)substr($selected_month_str, 5, 2);
                     $first_day_of_month = new DateTime("$year-$month-01");
                     $last_day_of_month = new DateTime("$year-$month-" . $first_day_of_month->format('t'));
                     $week_starts = [];
                     $current_week_start = clone $first_day_of_month;
                     $current_week_start->modify('last sunday');
-                    if ($current_week_start > $first_day_of_month && (int) $current_week_start->format('m') === $month && (int) $current_week_start->format('d') > (int) $first_day_of_month->format('d')) {
+                    if ($current_week_start > $first_day_of_month && (int)$current_week_start->format('m') === $month && (int)$current_week_start->format('d') > (int)$first_day_of_month->format('d')) {
                         $current_week_start = clone $first_day_of_month;
                     }
-                    if ((int) $current_week_start->format('m') < $month) {
+                    if ((int)$current_week_start->format('m') < $month) {
                         $current_week_start = clone $first_day_of_month;
                     }
-                    while ($current_week_start <= $last_day_of_month || (int) $current_week_start->format('m') === $month) {
+                    while ($current_week_start <= $last_day_of_month || (int)$current_week_start->format('m') === $month) {
                         $week_end = clone $current_week_start;
                         $week_end->modify('+6 days');
                         $week_key = $current_week_start->format('Y-m-d') . ' - ' . $week_end->format('Y-m-d');
@@ -923,7 +816,7 @@ if (isset($_GET['action'])) {
                         $current_week_start->modify('+7 days');
                     }
                     $sales = [];
-                    $stmt = $conn->prepare('SELECT s.total, si.quantity, s.sale_date FROM sales s JOIN sale_items si ON s.id = si.sale_id WHERE s.sale_date BETWEEN ? AND ?');
+                    $stmt = $conn->prepare("SELECT s.total, si.quantity, s.sale_date FROM sales s JOIN sale_items si ON s.id = si.sale_id WHERE s.sale_date BETWEEN ? AND ?");
                     $stmt->bind_param('ss', $first_day_of_month->format('Y-m-d 00:00:00'), $last_day_of_month->format('Y-m-d 23:59:59'));
                     $stmt->execute();
                     $result = $stmt->get_result();
@@ -947,10 +840,10 @@ if (isset($_GET['action'])) {
                     $chart_data_sales = [];
                     $raw_data_array = [['Metric' => 'Month', 'Value' => $selected_month_str]];
                     foreach ($week_starts as $key => $data) {
-                        $html .= '<tr><td>' . html(format_short_date($data['start']->getTimestamp())) . ' - ' . html(format_short_date($data['end']->getTimestamp())) . '</td><td>' . format_currency($data['total']) . '</td><td>' . html($data['count']) . ' sales, ' . html($data['items']) . ' items</td></tr>';
+                        $html .= "<tr><td>" . html(format_short_date($data['start']->getTimestamp())) . " - " . html(format_short_date($data['end']->getTimestamp())) . "</td><td>" . format_currency($data['total']) . "</td><td>" . html($data['count']) . " sales, " . html($data['items']) . " items</td></tr>";
                         $chart_labels[] = html(format_short_date($data['start']->getTimestamp()));
                         $chart_data_sales[] = $data['total'];
-                        $raw_data_array[] = ['Metric' => $key, 'Value' => format_currency($data['total']) . ' (' . $data['count'] . ' sales, ' . $data['items'] . ' items)'];
+                        $raw_data_array[] = ['Metric' => $key, 'Value' => format_currency($data['total']) . " (" . $data['count'] . " sales, " . $data['items'] . " items)"];
                     }
                     $report_data['table_html'] = $html ?: `<tr><td colspan="3">No weekly sales found for ` . html($selected_month_str) . `.</td></tr>`;
                     $report_data['chart_data'] = [
@@ -959,17 +852,17 @@ if (isset($_GET['action'])) {
                             ['label' => 'Weekly Sales', 'data' => $chart_data_sales, 'backgroundColor' => 'rgba(42, 157, 143, 0.7)', 'borderColor' => 'rgba(42, 157, 143, 1)', 'borderWidth' => 1, 'fill' => false, 'tension' => 0.3]
                         ],
                         'type' => 'line',
-                        'title' => 'Weekly Sales Report for ' . html($selected_month_str)
+                        'title' => "Weekly Sales Report for " . html($selected_month_str)
                     ];
                     $report_data['raw_data'] = $raw_data_array;
                     break;
                 case 'sales-monthly':
                     $selected_month_str = $_GET['month'] ?? date('Y-m');
-                    $year = (int) substr($selected_month_str, 0, 4);
-                    $month = (int) substr($selected_month_str, 5, 2);
+                    $year = (int)substr($selected_month_str, 0, 4);
+                    $month = (int)substr($selected_month_str, 5, 2);
                     $start_of_month = $selected_month_str . '-01 00:00:00';
                     $end_of_month = date('Y-m-t', strtotime($selected_month_str)) . ' 23:59:59';
-                    $stmt = $conn->prepare('SELECT s.total, s.discount, si.quantity FROM sales s JOIN sale_items si ON s.id = si.sale_id WHERE s.sale_date BETWEEN ? AND ?');
+                    $stmt = $conn->prepare("SELECT s.total, s.discount, si.quantity FROM sales s JOIN sale_items si ON s.id = si.sale_id WHERE s.sale_date BETWEEN ? AND ?");
                     $stmt->bind_param('ss', $start_of_month, $end_of_month);
                     $stmt->execute();
                     $result = $stmt->get_result();
@@ -982,20 +875,20 @@ if (isset($_GET['action'])) {
                     $total_items_sold = array_sum(array_column($monthly_sales, 'quantity'));
                     $total_discount_applied = array_sum(array_column($monthly_sales, 'discount'));
                     $num_sales = count(array_unique(array_column($monthly_sales, 'total')));
-                    $report_data['table_html'] = '
-                        <tr><td>Month</td><td>' . html($selected_month_str) . '</td><td></td></tr>
-                        <tr><td>Total Sales</td><td>' . format_currency($total_sales) . '</td><td></td></tr>
-                        <tr><td>Number of Sales</td><td>' . html($num_sales) . '</td><td></td></tr>
-                        <tr><td>Total Items Sold</td><td>' . html($total_items_sold) . '</td><td></td></tr>
-                        <tr><td>Total Discount Applied</td><td>' . format_currency($total_discount_applied) . '</td><td></td></tr>
-                    ';
+                    $report_data['table_html'] = "
+                        <tr><td>Month</td><td>" . html($selected_month_str) . "</td><td></td></tr>
+                        <tr><td>Total Sales</td><td>" . format_currency($total_sales) . "</td><td></td></tr>
+                        <tr><td>Number of Sales</td><td>" . html($num_sales) . "</td><td></td></tr>
+                        <tr><td>Total Items Sold</td><td>" . html($total_items_sold) . "</td><td></td></tr>
+                        <tr><td>Total Discount Applied</td><td>" . format_currency($total_discount_applied) . "</td><td></td></tr>
+                    ";
                     $report_data['chart_data'] = [
                         'labels' => ['Total Sales', 'Total Discount'],
                         'datasets' => [
                             ['label' => 'Amount', 'data' => [$total_sales, $total_discount_applied], 'backgroundColor' => ['#2a9d8f', '#f4a261'], 'borderColor' => ['#2a9d8f', '#f4a261'], 'borderWidth' => 1]
                         ],
                         'type' => 'bar',
-                        'title' => 'Monthly Sales Report for ' . html($selected_month_str)
+                        'title' => "Monthly Sales Report for " . html($selected_month_str)
                     ];
                     $report_data['raw_data'] = [
                         ['Metric' => 'Month', 'Value' => $selected_month_str],
@@ -1006,12 +899,12 @@ if (isset($_GET['action'])) {
                     ];
                     break;
                 case 'best-selling':
-                    $stmt = $conn->prepare('SELECT b.name, b.author, SUM(si.quantity) AS total_quantity_sold, SUM((si.price_per_unit * si.quantity) - si.discount_per_unit) AS total_revenue 
+                    $stmt = $conn->prepare("SELECT b.name, b.author, SUM(si.quantity) AS total_quantity_sold, SUM((si.price_per_unit * si.quantity) - si.discount_per_unit) AS total_revenue 
                                             FROM sale_items si 
                                             JOIN books b ON si.book_id = b.id 
                                             GROUP BY b.id 
                                             ORDER BY total_quantity_sold DESC 
-                                            LIMIT 10');
+                                            LIMIT 10");
                     $stmt->execute();
                     $result = $stmt->get_result();
                     $best_selling_books = [];
@@ -1025,7 +918,7 @@ if (isset($_GET['action'])) {
                     $chart_data_revenue = [];
                     $raw_data_array = [];
                     foreach ($best_selling_books as $index => $book) {
-                        $html .= '<tr><td>' . html($index + 1) . '</td><td>' . html($book['name']) . ' (' . html($book['author']) . ')</td><td>' . html($book['total_quantity_sold']) . ' units sold, ' . format_currency($book['total_revenue']) . ' revenue</td></tr>';
+                        $html .= "<tr><td>" . html($index + 1) . "</td><td>" . html($book['name']) . " (" . html($book['author']) . ")</td><td>" . html($book['total_quantity_sold']) . " units sold, " . format_currency($book['total_revenue']) . " revenue</td></tr>";
                         $chart_labels[] = html($book['name']);
                         $chart_data_sales[] = $book['total_quantity_sold'];
                         $chart_data_revenue[] = $book['total_revenue'];
@@ -1064,7 +957,7 @@ if (isset($_GET['action'])) {
                     $chart_data_revenue = [];
                     $raw_data_array = [];
                     foreach ($best_selling_authors as $index => $author) {
-                        $html .= '<tr><td>' . html($index + 1) . '</td><td>' . html($author['author']) . '</td><td>' . html($author['total_quantity_sold']) . ' units sold, ' . format_currency($author['total_revenue']) . ' revenue</td></tr>';
+                        $html .= "<tr><td>" . html($index + 1) . "</td><td>" . html($author['author']) . "</td><td>" . html($author['total_quantity_sold']) . " units sold, " . format_currency($author['total_revenue']) . " revenue</td></tr>";
                         $chart_labels[] = html($author['author']);
                         $chart_data_sales[] = $author['total_quantity_sold'];
                         $chart_data_revenue[] = $author['total_revenue'];
@@ -1083,7 +976,7 @@ if (isset($_GET['action'])) {
                     $report_data['raw_data'] = $raw_data_array;
                     break;
                 case 'low-stock':
-                    $stmt = $conn->prepare('SELECT name, author, stock, isbn, product_type FROM books WHERE stock < 5 ORDER BY stock ASC');
+                    $stmt = $conn->prepare("SELECT name, author, stock, isbn, product_type FROM books WHERE stock < 5 ORDER BY stock ASC");
                     $stmt->execute();
                     $result = $stmt->get_result();
                     $low_stock_books = [];
@@ -1096,7 +989,7 @@ if (isset($_GET['action'])) {
                     $chart_data_stock = [];
                     $raw_data_array = [];
                     foreach ($low_stock_books as $index => $book) {
-                        $html .= "<tr class='low-stock'><td>" . html($index + 1) . '</td><td>' . html($book['name']) . ($book['author'] ? ' (' . html($book['author']) . ')' : '') . '</td><td>' . html($book['stock']) . ' in stock</td></tr>';
+                        $html .= "<tr class='low-stock'><td>" . html($index + 1) . "</td><td>" . html($book['name']) . ($book['author'] ? " (" . html($book['author']) . ")" : '') . "</td><td>" . html($book['stock']) . " in stock</td></tr>";
                         $chart_labels[] = html($book['name']);
                         $chart_data_stock[] = $book['stock'];
                         $raw_data_array[] = ['Rank' => $index + 1, 'Name' => $book['name'], 'Author' => $book['author'], 'Stock' => $book['stock'], 'ISBN' => $book['isbn'], 'Product Type' => $book['product_type']];
@@ -1116,7 +1009,7 @@ if (isset($_GET['action'])) {
                     $selected_month_str = $_GET['month'] ?? date('Y-m');
                     $start_of_month = $selected_month_str . '-01 00:00:00';
                     $end_of_month = date('Y-m-t', strtotime($selected_month_str)) . ' 23:59:59';
-                    $stmt = $conn->prepare('SELECT category, SUM(amount) AS total_amount FROM expenses WHERE expense_date BETWEEN ? AND ? GROUP BY category ORDER BY total_amount DESC');
+                    $stmt = $conn->prepare("SELECT category, SUM(amount) AS total_amount FROM expenses WHERE expense_date BETWEEN ? AND ? GROUP BY category ORDER BY total_amount DESC");
                     $stmt->bind_param('ss', $start_of_month, $end_of_month);
                     $stmt->execute();
                     $result = $stmt->get_result();
@@ -1132,12 +1025,12 @@ if (isset($_GET['action'])) {
                     $chart_data_amounts = [];
                     $raw_data_array = [['Metric' => 'Month', 'Value' => $selected_month_str], ['Metric' => 'Total Monthly Expenses', 'Value' => format_currency($total_expenses)]];
                     foreach ($expenses_by_category as $expense) {
-                        $html .= '<tr><td>-</td><td>' . html($expense['category']) . '</td><td>' . format_currency($expense['total_amount']) . '</td></tr>';
+                        $html .= "<tr><td>-</td><td>" . html($expense['category']) . "</td><td>" . format_currency($expense['total_amount']) . "</td></tr>";
                         $chart_labels[] = html($expense['category']);
                         $chart_data_amounts[] = $expense['total_amount'];
                         $raw_data_array[] = ['Metric' => $expense['category'], 'Value' => format_currency($expense['total_amount'])];
                     }
-                    $html .= '<tr><td><strong>Total</strong></td><td></td><td><strong>' . format_currency($total_expenses) . '</strong></td></tr>';
+                    $html .= "<tr><td><strong>Total</strong></td><td></td><td><strong>" . format_currency($total_expenses) . "</strong></td></tr>";
                     $report_data['table_html'] = $html ?: '<tr><td colspan="3">No expenses recorded for ' . html($selected_month_str) . '.</td></tr>';
                     $report_data['chart_data'] = [
                         'labels' => $chart_labels,
@@ -1145,165 +1038,12 @@ if (isset($_GET['action'])) {
                             ['label' => 'Amount', 'data' => $chart_data_amounts, 'backgroundColor' => [], 'borderColor' => [], 'borderWidth' => 1]
                         ],
                         'type' => 'pie',
-                        'title' => 'Expenses Summary for ' . html($selected_month_str)
+                        'title' => "Expenses Summary for " . html($selected_month_str)
                     ];
                     $report_data['raw_data'] = $raw_data_array;
                     break;
             }
             echo json_encode(['success' => true, 'report_data' => $report_data]);
-            exit();
-        case 'get_users_json':
-            if (!hasAccess('users')) {
-                echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-                exit();
-            }
-            $stmt = $conn->query('SELECT u.id, u.username, u.role_id, r.name as role_name FROM users u LEFT JOIN roles r ON u.role_id = r.id');
-            $users = $stmt->fetch_all(MYSQLI_ASSOC);
-            echo json_encode(['success' => true, 'users' => $users]);
-            exit();
-        case 'get_roles_json':
-            if (!hasAccess('users')) {
-                echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-                exit();
-            }
-            $roles = $conn->query('SELECT * FROM roles')->fetch_all(MYSQLI_ASSOC);
-            $perms = $conn->query('SELECT * FROM role_page_permissions')->fetch_all(MYSQLI_ASSOC);
-            foreach ($roles as &$r) {
-                $r['permissions'] = array_column(array_filter($perms, fn($p) => $p['role_id'] == $r['id']), 'page_key');
-            }
-            echo json_encode(['success' => true, 'roles' => $roles]);
-            exit();
-        case 'get_dashboard_stats_json':
-            if (!isAdmin() && !isStaff()) {
-                echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-                exit();
-            }
-            $today = date('Y-m-d');
-            $start_of_day = $today . ' 00:00:00';
-            $end_of_day = $today . ' 23:59:59';
-            $stmt = $conn->prepare('SELECT COUNT(*) as cnt, SUM(total) as rev FROM sales WHERE sale_date BETWEEN ? AND ?');
-            $stmt->bind_param('ss', $start_of_day, $end_of_day);
-            $stmt->execute();
-            $today_stats = $stmt->get_result()->fetch_assoc();
-            $stmt->close();
-            $month_start = date('Y-m-01 00:00:00');
-            $stmt = $conn->prepare('SELECT SUM(total) as rev FROM sales WHERE sale_date BETWEEN ? AND ?');
-            $stmt->bind_param('ss', $month_start, $end_of_day);
-            $stmt->execute();
-            $month_stats = $stmt->get_result()->fetch_assoc();
-            $stmt->close();
-            $stmt = $conn->prepare('SELECT COUNT(*) FROM online_orders WHERE status = "pending"');
-            $stmt->execute();
-            $pending_orders = $stmt->get_result()->fetch_row()[0];
-            $stmt->close();
-
-            $total_products = $conn->query('SELECT COUNT(*) FROM books')->fetch_row()[0] ?? 0;
-            $total_customers = $conn->query('SELECT COUNT(*) FROM customers WHERE is_active = 1')->fetch_row()[0] ?? 0;
-            $total_suppliers = $conn->query('SELECT COUNT(*) FROM suppliers')->fetch_row()[0] ?? 0;
-            $low_stock_cnt = $conn->query('SELECT COUNT(*) FROM books WHERE stock < 5')->fetch_row()[0] ?? 0;
-            $lifetime_rev = $conn->query('SELECT SUM(total) FROM sales')->fetch_row()[0] ?? 0;
-            $total_expenses = $conn->query('SELECT SUM(amount) FROM expenses')->fetch_row()[0] ?? 0;
-            $active_promos = $conn->query('SELECT COUNT(*) FROM promotions WHERE start_date <= CURDATE() AND (end_date IS NULL OR end_date >= CURDATE())')->fetch_row()[0] ?? 0;
-            $stock_value = $conn->query('SELECT SUM(stock * COALESCE(purchase_price, price)) FROM books')->fetch_row()[0] ?? 0;
-
-            $weekly_labels = [];
-            $weekly_data = [];
-            for ($i = 6; $i >= 0; $i--) {
-                $d = date('Y-m-d', strtotime("-$i days"));
-                $weekly_labels[] = date('D, M d', strtotime($d));
-                $ds = $d . ' 00:00:00';
-                $de = $d . ' 23:59:59';
-                $stmt = $conn->prepare('SELECT SUM(total) as rev FROM sales WHERE sale_date BETWEEN ? AND ?');
-                $stmt->bind_param('ss', $ds, $de);
-                $stmt->execute();
-                $rev = $stmt->get_result()->fetch_assoc()['rev'] ?? 0;
-                $weekly_data[] = (float) $rev;
-                $stmt->close();
-            }
-            $stmt = $conn->prepare('SELECT b.name, SUM(si.quantity) as qty FROM sale_items si JOIN sales s ON si.sale_id = s.id JOIN books b ON si.book_id = b.id WHERE s.sale_date BETWEEN ? AND ? GROUP BY b.id ORDER BY qty DESC LIMIT 5');
-            $stmt->bind_param('ss', $month_start, $end_of_day);
-            $stmt->execute();
-            $top_products = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-            $stmt->close();
-
-            $monthly_labels = [];
-            $monthly_sales = [];
-            $monthly_expenses = [];
-            for ($i = 5; $i >= 0; $i--) {
-                $m = date('Y-m', strtotime("-$i months"));
-                $monthly_labels[] = date('M Y', strtotime($m . '-01'));
-                $m_start = $m . '-01 00:00:00';
-                $m_end = date('Y-m-t', strtotime($m_start)) . ' 23:59:59';
-                $s_stmt = $conn->prepare('SELECT SUM(total) FROM sales WHERE sale_date BETWEEN ? AND ?');
-                $s_stmt->bind_param('ss', $m_start, $m_end);
-                $s_stmt->execute();
-                $monthly_sales[] = (float) ($s_stmt->get_result()->fetch_row()[0] ?? 0);
-                $s_stmt->close();
-                $e_stmt = $conn->prepare('SELECT SUM(amount) FROM expenses WHERE expense_date BETWEEN ? AND ?');
-                $e_stmt->bind_param('ss', $m_start, $m_end);
-                $e_stmt->execute();
-                $monthly_expenses[] = (float) ($e_stmt->get_result()->fetch_row()[0] ?? 0);
-                $e_stmt->close();
-            }
-
-            $order_stats = $conn->query('SELECT status, COUNT(*) as cnt FROM online_orders GROUP BY status')->fetch_all(MYSQLI_ASSOC);
-
-            echo json_encode([
-                'success' => true,
-                'today_rev' => (float) $today_stats['rev'],
-                'today_cnt' => (int) $today_stats['cnt'],
-                'month_rev' => (float) $month_stats['rev'],
-                'pending_orders' => (int) $pending_orders,
-                'total_products' => (int) $total_products,
-                'total_customers' => (int) $total_customers,
-                'total_suppliers' => (int) $total_suppliers,
-                'low_stock_cnt' => (int) $low_stock_cnt,
-                'lifetime_rev' => (float) $lifetime_rev,
-                'total_expenses' => (float) $total_expenses,
-                'active_promos' => (int) $active_promos,
-                'stock_value' => (float) $stock_value,
-                'chart_weekly' => ['labels' => $weekly_labels, 'data' => $weekly_data],
-                'chart_top' => $top_products,
-                'chart_monthly' => ['labels' => $monthly_labels, 'sales' => $monthly_sales, 'expenses' => $monthly_expenses],
-                'chart_orders' => $order_stats
-            ]);
-            exit();
-        case 'get_live_sales_json':
-            if (!isAdmin()) {
-                echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-                exit();
-            }
-            $today = date('Y-m-d');
-            $start_of_day = $today . ' 00:00:00';
-            $end_of_day = $today . ' 23:59:59';
-            $stmt = $conn->prepare('SELECT COUNT(*) as total_orders, SUM(total) as total_revenue, SUM(discount) as total_discount FROM sales WHERE sale_date BETWEEN ? AND ?');
-            $stmt->bind_param('ss', $start_of_day, $end_of_day);
-            $stmt->execute();
-            $summary = $stmt->get_result()->fetch_assoc();
-            $stmt->close();
-            $stmt = $conn->prepare("SELECT s.id, s.sale_date, c.name AS customer_name, s.total, s.discount, s.promotion_code,
-                                    u.username AS sold_by_user, psl.link_name AS public_link_name,
-                                    GROUP_CONCAT(CONCAT(b.name, ' (', si.quantity, ')') SEPARATOR ', ') AS item_names
-                                    FROM sales s 
-                                    LEFT JOIN customers c ON s.customer_id = c.id
-                                    LEFT JOIN users u ON s.user_id = u.id
-                                    LEFT JOIN public_sale_links psl ON psl.id = SUBSTRING_INDEX(SUBSTRING_INDEX(s.promotion_code, '-', 3), '-', -1) AND s.promotion_code LIKE 'PUBLIC-LINK-%'
-                                    JOIN sale_items si ON s.id = si.sale_id 
-                                    JOIN books b ON si.book_id = b.id
-                                    WHERE s.sale_date BETWEEN ? AND ? GROUP BY s.id ORDER BY s.sale_date DESC LIMIT 50");
-            $stmt->bind_param('ss', $start_of_day, $end_of_day);
-            $stmt->execute();
-            $recent_sales = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-            $stmt->close();
-            echo json_encode([
-                'success' => true,
-                'summary' => [
-                    'revenue' => (float) $summary['total_revenue'],
-                    'orders' => (int) $summary['total_orders'],
-                    'discount' => (float) $summary['total_discount']
-                ],
-                'recent_sales' => $recent_sales
-            ]);
             exit();
         case 'global_search_json':
             if (!isAdmin() && !isStaff()) {
@@ -1317,7 +1057,7 @@ if (isset($_GET['action'])) {
                 exit();
             }
             $search_term = '%' . $query . '%';
-            $stmt = $conn->prepare('SELECT id, name FROM books WHERE name LIKE ? LIMIT 5');
+            $stmt = $conn->prepare("SELECT id, name FROM books WHERE name LIKE ? LIMIT 5");
             $stmt->bind_param('s', $search_term);
             $stmt->execute();
             $book_res = $stmt->get_result();
@@ -1325,7 +1065,7 @@ if (isset($_GET['action'])) {
                 $results[] = ['type' => 'Product', 'id' => $row['id'], 'name' => $row['name'], 'link' => 'index.php?page=books'];
             }
             $stmt->close();
-            $stmt = $conn->prepare('SELECT id, name FROM customers WHERE name LIKE ? LIMIT 5');
+            $stmt = $conn->prepare("SELECT id, name FROM customers WHERE name LIKE ? LIMIT 5");
             $stmt->bind_param('s', $search_term);
             $stmt->execute();
             $customer_res = $stmt->get_result();
@@ -1333,7 +1073,7 @@ if (isset($_GET['action'])) {
                 $results[] = ['type' => 'Customer', 'id' => $row['id'], 'name' => $row['name'], 'link' => 'index.php?page=customers'];
             }
             $stmt->close();
-            $stmt = $conn->prepare('SELECT id FROM sales WHERE id LIKE ? LIMIT 5');
+            $stmt = $conn->prepare("SELECT id FROM sales WHERE id LIKE ? LIMIT 5");
             $stmt->bind_param('s', $search_term);
             $stmt->execute();
             $sale_res = $stmt->get_result();
@@ -1353,7 +1093,7 @@ if (isset($_GET['action'])) {
                 echo json_encode(['success' => false, 'message' => 'Order ID is required.']);
                 exit();
             }
-            $stmt = $conn->prepare('SELECT status FROM online_orders WHERE id = ? AND customer_id = ?');
+            $stmt = $conn->prepare("SELECT status FROM online_orders WHERE id = ? AND customer_id = ?");
             $stmt->bind_param('ii', $order_id, $_SESSION['customer_id']);
             $stmt->execute();
             $result = $stmt->get_result();
@@ -1365,141 +1105,6 @@ if (isset($_GET['action'])) {
                 echo json_encode(['success' => false, 'message' => 'Order not found or you do not have permission.']);
             }
             exit();
-        case 'get_book_by_barcode_json':
-            $barcode = trim($_GET['barcode'] ?? '');
-            $token = trim($_GET['token'] ?? '');
-            if ($barcode === '') {
-                echo json_encode(['success' => false, 'message' => 'Barcode is required.']);
-                exit();
-            }
-            if (!isLoggedIn() && !has_public_sale_access($token)) {
-                echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-                exit();
-            }
-            $cleanBarcode = preg_replace('/\s+/', '', $barcode);
-            $stmt = $conn->prepare("SELECT *, COALESCE(retail_price, price) AS retail_price, COALESCE(wholesale_price, price) AS wholesale_price FROM books WHERE barcode = ? OR isbn = ? OR REPLACE(IFNULL(isbn,''), '-', '') = ? LIMIT 1");
-            $stmt->bind_param('sss', $cleanBarcode, $cleanBarcode, $cleanBarcode);
-            $stmt->execute();
-            $book = $stmt->get_result()->fetch_assoc();
-            $stmt->close();
-            if (!$book) {
-                echo json_encode(['success' => false, 'message' => 'No product found for this barcode.']);
-                exit();
-            }
-            if ($token && has_public_sale_access($token)) {
-                $link = current_public_sale_link($conn, $token);
-                $priceMode = $link['price_mode'] ?? 'retail';
-                $book['link_price_mode'] = $priceMode;
-                $book['link_price'] = $priceMode === 'wholesale' ? ($book['wholesale_price'] ?: $book['retail_price']) : ($book['retail_price'] ?: $book['price']);
-            }
-            echo json_encode(['success' => true, 'book' => $book]);
-            exit();
-        case 'get_sidebar_products_json':
-            $token = trim($_GET['token'] ?? '');
-            if (!isLoggedIn() && !has_public_sale_access($token)) {
-                echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-                exit();
-            }
-            $search = trim($_GET['search'] ?? '');
-            $category = trim($_GET['category'] ?? 'all');
-            $productType = trim($_GET['product_type'] ?? 'all');
-            $where = ['stock > 0'];
-            $params = [];
-            $types = '';
-            if ($search !== '') {
-                $like = '%' . $search . '%';
-                $where[] = '(name LIKE ? OR author LIKE ? OR isbn LIKE ? OR barcode LIKE ? OR category LIKE ?)';
-                array_push($params, $like, $like, $like, $like, $like);
-                $types .= 'sssss';
-            }
-            if ($category !== '' && $category !== 'all') {
-                $where[] = 'category = ?';
-                $params[] = $category;
-                $types .= 's';
-            }
-            if ($productType !== '' && $productType !== 'all') {
-                $where[] = 'product_type = ?';
-                $params[] = $productType;
-                $types .= 's';
-            }
-            $whereSql = 'WHERE ' . implode(' AND ', $where);
-            $stmt = $conn->prepare("SELECT id, name, author, category, product_type, barcode, stock, price, COALESCE(retail_price, price) AS retail_price, COALESCE(wholesale_price, price) AS wholesale_price FROM books {$whereSql} ORDER BY name ASC LIMIT 150");
-            if ($types) {
-                $stmt->bind_param($types, ...$params);
-            }
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $rows = [];
-            $priceMode = 'retail';
-            if ($token && has_public_sale_access($token)) {
-                $link = current_public_sale_link($conn, $token);
-                if ($link) {
-                    $priceMode = $link['price_mode'];
-                }
-            }
-            while ($row = $result->fetch_assoc()) {
-                $row['display_price'] = $priceMode === 'wholesale' ? ($row['wholesale_price'] ?: $row['retail_price']) : ($row['retail_price'] ?: $row['price']);
-                $rows[] = $row;
-            }
-            $stmt->close();
-            $categoryRows = $conn->query("SELECT DISTINCT category FROM books WHERE category IS NOT NULL AND category <> '' ORDER BY category ASC");
-            $categories = [];
-            if ($categoryRows) {
-                while ($cat = $categoryRows->fetch_assoc()) {
-                    $categories[] = $cat['category'];
-                }
-            }
-            echo json_encode(['success' => true, 'books' => $rows, 'categories' => $categories, 'price_mode' => $priceMode]);
-            exit();
-        case 'ajax_quick_sell':
-            if (!isAdmin() && !isStaff()) {
-                echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-                exit();
-            }
-            $data = json_decode(file_get_contents('php://input'), true);
-            $book_id = $data['book_id'] ?? null;
-            $qty = (int) ($data['quantity'] ?? 1);
-            if (empty($book_id) || $qty < 1) {
-                echo json_encode(['success' => false, 'message' => 'Invalid product or quantity.']);
-                exit();
-            }
-            $conn->begin_transaction();
-            try {
-                $stmt_book = $conn->prepare('SELECT name, price, stock FROM books WHERE id = ?');
-                $stmt_book->bind_param('i', $book_id);
-                $stmt_book->execute();
-                $book_data = $stmt_book->get_result()->fetch_assoc();
-                $stmt_book->close();
-                if (!$book_data)
-                    throw new Exception('Product not found.');
-                if ($book_data['stock'] < $qty)
-                    throw new Exception('Not enough stock. Available: ' . $book_data['stock']);
-
-                $user_id = $_SESSION['user_id'];
-                $subtotal = $book_data['price'] * $qty;
-                $stmt_sale = $conn->prepare('INSERT INTO sales (customer_id, user_id, subtotal, discount, total) VALUES (NULL, ?, ?, 0, ?)');
-                $stmt_sale->bind_param('idd', $user_id, $subtotal, $subtotal);
-                $stmt_sale->execute();
-                $sale_id = $conn->insert_id;
-                $stmt_sale->close();
-
-                $stmt_sale_item = $conn->prepare('INSERT INTO sale_items (sale_id, book_id, quantity, price_per_unit, discount_per_unit) VALUES (?, ?, ?, ?, 0)');
-                $stmt_sale_item->bind_param('iiid', $sale_id, $book_id, $qty, $book_data['price']);
-                $stmt_sale_item->execute();
-                $stmt_sale_item->close();
-
-                $stmt_update_stock = $conn->prepare('UPDATE books SET stock = stock - ? WHERE id = ?');
-                $stmt_update_stock->bind_param('ii', $qty, $book_id);
-                $stmt_update_stock->execute();
-                $stmt_update_stock->close();
-
-                $conn->commit();
-                echo json_encode(['success' => true, 'message' => 'Quick sale completed for ' . $qty . 'x ' . html($book_data['name'])]);
-            } catch (Exception $e) {
-                $conn->rollback();
-                echo json_encode(['success' => false, 'message' => 'Quick sale failed: ' . $e->getMessage()]);
-            }
-            exit();
         default:
             echo json_encode(['success' => false, 'message' => 'Invalid action.']);
             exit();
@@ -1509,7 +1114,7 @@ if (isset($_POST['action'])) {
     $action = $_POST['action'];
     $message_type = 'error';
     $message = 'An unknown error occurred.';
-    if (in_array($action, ['login', 'customer_register', 'customer_login', 'public_sale_login', 'submit_public_sale'])) {
+    if (in_array($action, ['login', 'customer_register', 'customer_login'])) {
     } elseif (!isLoggedIn()) {
         $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
         redirect('login');
@@ -1518,8 +1123,8 @@ if (isset($_POST['action'])) {
         case 'login':
             $username = $_POST['username'] ?? '';
             $password = $_POST['password'] ?? '';
-            $stmt = $conn->prepare('SELECT u.id, u.username, u.password_hash, u.role_id, r.name as role FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.username = ?');
-            $stmt->bind_param('s', $username);
+            $stmt = $conn->prepare("SELECT id, username, password_hash, role FROM users WHERE username = ?");
+            $stmt->bind_param("s", $username);
             $stmt->execute();
             $result = $stmt->get_result();
             $user = $result->fetch_assoc();
@@ -1529,20 +1134,6 @@ if (isset($_POST['action'])) {
                 $_SESSION['user_id'] = $user['id'];
                 $_SESSION['username'] = $user['username'];
                 $_SESSION['user_role'] = $user['role'];
-                $_SESSION['role_id'] = $user['role_id'];
-
-                $perm_stmt = $conn->prepare('SELECT page_key FROM role_page_permissions WHERE role_id = ?');
-                $perm_stmt->bind_param('i', $user['role_id']);
-                $perm_stmt->execute();
-                $res = $perm_stmt->get_result();
-                $perms = [];
-                while ($p = $res->fetch_assoc()) {
-                    $perms[] = $p['page_key'];
-                }
-                $perm_stmt->close();
-                $_SESSION['permissions'] = $perms;
-                $_SESSION['auth_started_at'] = time();
-                $_SESSION['auth_started_at'] = time();
                 $_SESSION['toast'] = ['type' => 'success', 'message' => 'Welcome, ' . html($user['username']) . '!'];
                 redirect('dashboard');
             } else {
@@ -1553,8 +1144,8 @@ if (isset($_POST['action'])) {
         case 'customer_login':
             $email = $_POST['email'] ?? '';
             $password = $_POST['password'] ?? '';
-            $stmt = $conn->prepare('SELECT id, name, email, password_hash FROM customers WHERE email = ? AND is_active = 1');
-            $stmt->bind_param('s', $email);
+            $stmt = $conn->prepare("SELECT id, name, email, password_hash FROM customers WHERE email = ? AND is_active = 1");
+            $stmt->bind_param("s", $email);
             $stmt->execute();
             $result = $stmt->get_result();
             $customer = $result->fetch_assoc();
@@ -1564,8 +1155,6 @@ if (isset($_POST['action'])) {
                 $_SESSION['customer_id'] = $customer['id'];
                 $_SESSION['customer_name'] = $customer['name'];
                 $_SESSION['user_role'] = 'customer';
-                $_SESSION['auth_started_at'] = time();
-                $_SESSION['auth_started_at'] = time();
                 $_SESSION['toast'] = ['type' => 'success', 'message' => 'Welcome, ' . html($customer['name']) . '!'];
                 redirect('customer-dashboard');
             } else {
@@ -1596,7 +1185,7 @@ if (isset($_POST['action'])) {
                 $message = 'Password must be at least 6 characters long.';
                 break;
             }
-            $stmt_check = $conn->prepare('SELECT id FROM customers WHERE email = ?');
+            $stmt_check = $conn->prepare("SELECT id FROM customers WHERE email = ?");
             $stmt_check->bind_param('s', $email);
             $stmt_check->execute();
             if ($stmt_check->get_result()->num_rows > 0) {
@@ -1606,8 +1195,8 @@ if (isset($_POST['action'])) {
             }
             $stmt_check->close();
             $password_hash = password_hash($password, PASSWORD_BCRYPT);
-            $stmt = $conn->prepare('INSERT INTO customers (name, phone, email, password_hash, address, is_active) VALUES (?, ?, ?, ?, ?, 1)');
-            $stmt->bind_param('sssss', $name, $phone, $email, $password_hash, $address);
+            $stmt = $conn->prepare("INSERT INTO customers (name, phone, email, password_hash, address, is_active) VALUES (?, ?, ?, ?, ?, 1)");
+            $stmt->bind_param("sssss", $name, $phone, $email, $password_hash, $address);
             if ($stmt->execute()) {
                 $message_type = 'success';
                 $message = 'Registration successful! You can now log in.';
@@ -1631,11 +1220,7 @@ if (isset($_POST['action'])) {
             $publisher = $_POST['publisher'] ?? null;
             $year = $_POST['year'] ?? null;
             $price = $_POST['price'];
-            $purchase_price = $_POST['purchase_price'] ?? 0;
-            $retail_price = $_POST['retail_price'] ?? $_POST['price'];
-            $wholesale_price = $_POST['wholesale_price'] ?? $_POST['price'];
             $stock = $_POST['stock'];
-            $barcode = trim($_POST['barcode'] ?? '');
             $description = $_POST['description'] ?? null;
             $cover_image_path = $_POST['existing_cover_image'] ?? null;
             if (empty($name) || empty($product_type) || empty($category) || empty($price) || !isset($stock)) {
@@ -1646,15 +1231,9 @@ if (isset($_POST['action'])) {
                 $message = 'For "Book" type, Author and ISBN are required.';
                 break;
             }
-            if (!is_numeric($price) || $price < 0 || !is_numeric($retail_price) || $retail_price < 0 || !is_numeric($wholesale_price) || $wholesale_price < 0) {
-                $message = 'Invalid pricing values.';
+            if (!is_numeric($price) || $price < 0) {
+                $message = 'Invalid price.';
                 break;
-            }
-            $retail_price = (float) $retail_price;
-            $wholesale_price = (float) $wholesale_price;
-            $price = $retail_price;
-            if ($barcode === '' && !empty($isbn)) {
-                $barcode = preg_replace('/[^0-9A-Za-z]/', '', $isbn);
             }
             if (!is_numeric($stock) || $stock < 0) {
                 $message = 'Invalid stock quantity.';
@@ -1687,8 +1266,8 @@ if (isset($_POST['action'])) {
                 $cover_image_path = null;
             }
             if ($book_id) {
-                $stmt = $conn->prepare('UPDATE books SET name=?, product_type=?, author=?, category=?, isbn=?, publisher=?, year=?, price=?, purchase_price=?, retail_price=?, wholesale_price=?, stock=?, barcode=?, description=?, cover_image=? WHERE id=?');
-                $stmt->bind_param('ssssssiddddisssi', $name, $product_type, $author, $category, $isbn, $publisher, $year, $price, $purchase_price, $retail_price, $wholesale_price, $stock, $barcode, $description, $cover_image_path, $book_id);
+                $stmt = $conn->prepare("UPDATE books SET name=?, product_type=?, author=?, category=?, isbn=?, publisher=?, year=?, price=?, stock=?, description=?, cover_image=? WHERE id=?");
+                $stmt->bind_param("sssssidddssi", $name, $product_type, $author, $category, $isbn, $publisher, $year, $price, $stock, $description, $cover_image_path, $book_id);
                 if ($stmt->execute()) {
                     $message_type = 'success';
                     $message = 'Product updated successfully!';
@@ -1697,8 +1276,8 @@ if (isset($_POST['action'])) {
                 }
                 $stmt->close();
             } else {
-                $stmt = $conn->prepare('INSERT INTO books (name, product_type, author, category, isbn, publisher, year, price, purchase_price, retail_price, wholesale_price, stock, barcode, description, cover_image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-                $stmt->bind_param('ssssssiddddisss', $name, $product_type, $author, $category, $isbn, $publisher, $year, $price, $purchase_price, $retail_price, $wholesale_price, $stock, $barcode, $description, $cover_image_path);
+                $stmt = $conn->prepare("INSERT INTO books (name, product_type, author, category, isbn, publisher, year, price, stock, description, cover_image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                $stmt->bind_param("sssssiddds", $name, $product_type, $author, $category, $isbn, $publisher, $year, $price, $stock, $description, $cover_image_path);
                 if ($stmt->execute()) {
                     $message_type = 'success';
                     $message = 'Product added successfully!';
@@ -1715,17 +1294,17 @@ if (isset($_POST['action'])) {
             }
             $book_id = $_POST['book_id'] ?? null;
             if ($book_id) {
-                $sales_check_stmt = $conn->prepare('SELECT COUNT(*) FROM sale_items WHERE book_id = ?');
+                $sales_check_stmt = $conn->prepare("SELECT COUNT(*) FROM sale_items WHERE book_id = ?");
                 $sales_check_stmt->bind_param('i', $book_id);
                 $sales_check_stmt->execute();
                 $has_sales = $sales_check_stmt->get_result()->fetch_row()[0] > 0;
                 $sales_check_stmt->close();
-                $po_check_stmt = $conn->prepare('SELECT COUNT(*) FROM po_items WHERE book_id = ?');
+                $po_check_stmt = $conn->prepare("SELECT COUNT(*) FROM po_items WHERE book_id = ?");
                 $po_check_stmt->bind_param('i', $book_id);
                 $po_check_stmt->execute();
                 $has_pos = $po_check_stmt->get_result()->fetch_row()[0] > 0;
                 $po_check_stmt->close();
-                $online_order_check_stmt = $conn->prepare('SELECT COUNT(*) FROM online_order_items WHERE book_id = ?');
+                $online_order_check_stmt = $conn->prepare("SELECT COUNT(*) FROM online_order_items WHERE book_id = ?");
                 $online_order_check_stmt->bind_param('i', $book_id);
                 $online_order_check_stmt->execute();
                 $has_online_orders = $online_order_check_stmt->get_result()->fetch_row()[0] > 0;
@@ -1734,7 +1313,7 @@ if (isset($_POST['action'])) {
                     $message = 'Cannot delete product with existing sales, purchase orders, or online orders.';
                     break;
                 }
-                $stmt = $conn->prepare('SELECT cover_image FROM books WHERE id = ?');
+                $stmt = $conn->prepare("SELECT cover_image FROM books WHERE id = ?");
                 $stmt->bind_param('i', $book_id);
                 $stmt->execute();
                 $result = $stmt->get_result();
@@ -1743,8 +1322,8 @@ if (isset($_POST['action'])) {
                 if ($book && $book['cover_image'] && file_exists($book['cover_image'])) {
                     unlink($book['cover_image']);
                 }
-                $stmt = $conn->prepare('DELETE FROM books WHERE id=?');
-                $stmt->bind_param('i', $book_id);
+                $stmt = $conn->prepare("DELETE FROM books WHERE id=?");
+                $stmt->bind_param("i", $book_id);
                 if ($stmt->execute()) {
                     $message_type = 'success';
                     $message = 'Product deleted successfully!';
@@ -1768,30 +1347,30 @@ if (isset($_POST['action'])) {
             }
             $conn->begin_transaction();
             try {
-                $stmt_book = $conn->prepare('SELECT name, price, stock FROM books WHERE id = ?');
+                $stmt_book = $conn->prepare("SELECT name, price, stock FROM books WHERE id = ?");
                 $stmt_book->bind_param('i', $book_id);
                 $stmt_book->execute();
                 $book_data = $stmt_book->get_result()->fetch_assoc();
                 $stmt_book->close();
                 if (!$book_data) {
-                    throw new Exception('Product not found.');
+                    throw new Exception("Product not found.");
                 }
                 if ($book_data['stock'] < 1) {
-                    throw new Exception('Not enough stock for ' . html($book_data['name']) . '.');
+                    throw new Exception("Not enough stock for " . html($book_data['name']) . ".");
                 }
                 $user_id = $_SESSION['user_id'];
                 $subtotal = $book_data['price'];
                 $total = $book_data['price'];
-                $stmt_sale = $conn->prepare('INSERT INTO sales (customer_id, user_id, subtotal, discount, total, promotion_code) VALUES (NULL, ?, ?, 0, ?, NULL)');
+                $stmt_sale = $conn->prepare("INSERT INTO sales (customer_id, user_id, subtotal, discount, total, promotion_code) VALUES (NULL, ?, ?, 0, ?, NULL)");
                 $stmt_sale->bind_param('idd', $user_id, $subtotal, $total);
                 $stmt_sale->execute();
                 $sale_id = $conn->insert_id;
                 $stmt_sale->close();
-                $stmt_sale_item = $conn->prepare('INSERT INTO sale_items (sale_id, book_id, quantity, price_per_unit, discount_per_unit) VALUES (?, ?, 1, ?, 0)');
+                $stmt_sale_item = $conn->prepare("INSERT INTO sale_items (sale_id, book_id, quantity, price_per_unit, discount_per_unit) VALUES (?, ?, 1, ?, 0)");
                 $stmt_sale_item->bind_param('iid', $sale_id, $book_id, $book_data['price']);
                 $stmt_sale_item->execute();
                 $stmt_sale_item->close();
-                $stmt_update_stock = $conn->prepare('UPDATE books SET stock = stock - 1 WHERE id = ?');
+                $stmt_update_stock = $conn->prepare("UPDATE books SET stock = stock - 1 WHERE id = ?");
                 $stmt_update_stock->bind_param('i', $book_id);
                 $stmt_update_stock->execute();
                 $stmt_update_stock->close();
@@ -1814,8 +1393,8 @@ if (isset($_POST['action'])) {
                 $message = 'Invalid input for restock.';
                 break;
             }
-            $stmt = $conn->prepare('UPDATE books SET stock = stock + ? WHERE id = ?');
-            $stmt->bind_param('ii', $quantity_to_add, $book_id);
+            $stmt = $conn->prepare("UPDATE books SET stock = stock + ? WHERE id = ?");
+            $stmt->bind_param("ii", $quantity_to_add, $book_id);
             if ($stmt->execute()) {
                 $message_type = 'success';
                 $message = 'Product stock updated successfully!';
@@ -1823,121 +1402,6 @@ if (isset($_POST['action'])) {
                 $message = 'Failed to update stock: ' . $stmt->error;
             }
             $stmt->close();
-            break;
-        case 'save_user':
-            if (!hasAccess('users')) {
-                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized'];
-                redirect('users');
-            }
-            $u_id = $_POST['user_id'] ?? null;
-            $u_name = $_POST['username'];
-            $u_role = (int) $_POST['role_id'];
-            $u_pass = $_POST['password'] ?? '';
-            $stmt_check = $conn->prepare('SELECT id FROM users WHERE username = ? AND id != ?');
-            $check_id = $u_id ?: 0;
-            $stmt_check->bind_param('si', $u_name, $check_id);
-            $stmt_check->execute();
-            if ($stmt_check->get_result()->num_rows > 0) {
-                $message = 'Username exists.';
-                break;
-            }
-            $stmt_check->close();
-            if ($u_id) {
-                if (!empty($u_pass)) {
-                    $hash = password_hash($u_pass, PASSWORD_BCRYPT);
-                    $stmt = $conn->prepare('UPDATE users SET username=?, role_id=?, password_hash=? WHERE id=?');
-                    $stmt->bind_param('sisi', $u_name, $u_role, $hash, $u_id);
-                } else {
-                    $stmt = $conn->prepare('UPDATE users SET username=?, role_id=? WHERE id=?');
-                    $stmt->bind_param('sii', $u_name, $u_role, $u_id);
-                }
-            } else {
-                if (empty($u_pass)) {
-                    $message = 'Password required for new user.';
-                    break;
-                }
-                $hash = password_hash($u_pass, PASSWORD_BCRYPT);
-                $stmt = $conn->prepare('INSERT INTO users (username, role_id, password_hash) VALUES (?, ?, ?)');
-                $stmt->bind_param('sis', $u_name, $u_role, $hash);
-            }
-            if ($stmt->execute()) {
-                $message_type = 'success';
-                $message = 'User saved successfully!';
-            } else {
-                $message = 'Failed to save user.';
-            }
-            break;
-        case 'delete_user':
-            if (!hasAccess('users')) {
-                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized'];
-                redirect('users');
-            }
-            $u_id = $_POST['user_id'] ?? null;
-            if ($u_id == $_SESSION['user_id']) {
-                $message = 'Cannot delete yourself.';
-                break;
-            }
-            $stmt = $conn->prepare('DELETE FROM users WHERE id=?');
-            $stmt->bind_param('i', $u_id);
-            if ($stmt->execute()) {
-                $message_type = 'success';
-                $message = 'User deleted!';
-            } else {
-                $message = 'Failed to delete user.';
-            }
-            break;
-        case 'save_role':
-            if (!hasAccess('users')) {
-                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized'];
-                redirect('users');
-            }
-            $r_id = $_POST['role_id'] ?? null;
-            $r_name = $_POST['role_name'];
-            $pages = $_POST['pages'] ?? [];
-            if ($r_id) {
-                $stmt = $conn->prepare('UPDATE roles SET name=? WHERE id=?');
-                $stmt->bind_param('si', $r_name, $r_id);
-                $stmt->execute();
-            } else {
-                $stmt = $conn->prepare('INSERT INTO roles (name) VALUES (?)');
-                $stmt->bind_param('s', $r_name);
-                $stmt->execute();
-                $r_id = $conn->insert_id;
-            }
-            $stmt = $conn->prepare('DELETE FROM role_page_permissions WHERE role_id=?');
-            $stmt->bind_param('i', $r_id);
-            $stmt->execute();
-            if (!empty($pages)) {
-                $stmt = $conn->prepare('INSERT INTO role_page_permissions (role_id, page_key) VALUES (?, ?)');
-                foreach ($pages as $p) {
-                    $stmt->bind_param('is', $r_id, $p);
-                    $stmt->execute();
-                }
-            }
-            $message_type = 'success';
-            $message = 'Role saved successfully!';
-            break;
-        case 'delete_role':
-            if (!hasAccess('users')) {
-                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized'];
-                redirect('users');
-            }
-            $r_id = $_POST['role_id'] ?? null;
-            $stmt_check = $conn->prepare('SELECT COUNT(*) FROM users WHERE role_id=?');
-            $stmt_check->bind_param('i', $r_id);
-            $stmt_check->execute();
-            if ($stmt_check->get_result()->fetch_row()[0] > 0) {
-                $message = 'Cannot delete role assigned to users.';
-                break;
-            }
-            $stmt = $conn->prepare('DELETE FROM roles WHERE id=?');
-            $stmt->bind_param('i', $r_id);
-            if ($stmt->execute()) {
-                $message_type = 'success';
-                $message = 'Role deleted!';
-            } else {
-                $message = 'Failed to delete role.';
-            }
             break;
         case 'save_customer':
             $customer_id = $_POST['customer_id'] ?? null;
@@ -1959,7 +1423,7 @@ if (isset($_POST['action'])) {
                 $password_hash = password_hash($password, PASSWORD_BCRYPT);
             }
             if ($email) {
-                $stmt_check = $conn->prepare('SELECT id FROM customers WHERE email = ? AND id != ?');
+                $stmt_check = $conn->prepare("SELECT id FROM customers WHERE email = ? AND id != ?");
                 $stmt_check->bind_param('si', $email, $customer_id);
                 $stmt_check->execute();
                 if ($stmt_check->get_result()->num_rows > 0) {
@@ -1971,11 +1435,11 @@ if (isset($_POST['action'])) {
             }
             if ($customer_id) {
                 if ($password_hash) {
-                    $stmt = $conn->prepare('UPDATE customers SET name=?, phone=?, email=?, password_hash=?, address=? WHERE id=?');
-                    $stmt->bind_param('sssssi', $name, $phone, $email, $password_hash, $address, $customer_id);
+                    $stmt = $conn->prepare("UPDATE customers SET name=?, phone=?, email=?, password_hash=?, address=? WHERE id=?");
+                    $stmt->bind_param("sssssi", $name, $phone, $email, $password_hash, $address, $customer_id);
                 } else {
-                    $stmt = $conn->prepare('UPDATE customers SET name=?, phone=?, email=?, address=? WHERE id=?');
-                    $stmt->bind_param('ssssi', $name, $phone, $email, $address, $customer_id);
+                    $stmt = $conn->prepare("UPDATE customers SET name=?, phone=?, email=?, address=? WHERE id=?");
+                    $stmt->bind_param("ssssi", $name, $phone, $email, $address, $customer_id);
                 }
                 if ($stmt->execute()) {
                     $message_type = 'success';
@@ -1989,8 +1453,8 @@ if (isset($_POST['action'])) {
                     $message = 'Password is required for new customer.';
                     break;
                 }
-                $stmt = $conn->prepare('INSERT INTO customers (name, phone, email, password_hash, address) VALUES (?, ?, ?, ?, ?)');
-                $stmt->bind_param('sssss', $name, $phone, $email, $password_hash, $address);
+                $stmt = $conn->prepare("INSERT INTO customers (name, phone, email, password_hash, address) VALUES (?, ?, ?, ?, ?)");
+                $stmt->bind_param("sssss", $name, $phone, $email, $password_hash, $address);
                 if ($stmt->execute()) {
                     $message_type = 'success';
                     $message = 'Customer added successfully!';
@@ -2005,8 +1469,8 @@ if (isset($_POST['action'])) {
             $current_status = filter_var($_POST['current_status'], FILTER_VALIDATE_BOOLEAN);
             if ($customer_id) {
                 $new_status = !$current_status;
-                $stmt = $conn->prepare('UPDATE customers SET is_active=? WHERE id=?');
-                $stmt->bind_param('ii', $new_status, $customer_id);
+                $stmt = $conn->prepare("UPDATE customers SET is_active=? WHERE id=?");
+                $stmt->bind_param("ii", $new_status, $customer_id);
                 if ($stmt->execute()) {
                     $message_type = 'info';
                     $message = 'Customer status updated to ' . ($new_status ? 'Active' : 'Inactive') . '.';
@@ -2034,7 +1498,7 @@ if (isset($_POST['action'])) {
                 break;
             }
             if ($email) {
-                $stmt_check = $conn->prepare('SELECT id FROM suppliers WHERE email = ? AND id != ?');
+                $stmt_check = $conn->prepare("SELECT id FROM suppliers WHERE email = ? AND id != ?");
                 $stmt_check->bind_param('si', $email, $supplier_id);
                 $stmt_check->execute();
                 if ($stmt_check->get_result()->num_rows > 0) {
@@ -2045,8 +1509,8 @@ if (isset($_POST['action'])) {
                 $stmt_check->close();
             }
             if ($supplier_id) {
-                $stmt = $conn->prepare('UPDATE suppliers SET name=?, contact_person=?, phone=?, email=?, address=? WHERE id=?');
-                $stmt->bind_param('sssssi', $name, $contact_person, $phone, $email, $address, $supplier_id);
+                $stmt = $conn->prepare("UPDATE suppliers SET name=?, contact_person=?, phone=?, email=?, address=? WHERE id=?");
+                $stmt->bind_param("sssssi", $name, $contact_person, $phone, $email, $address, $supplier_id);
                 if ($stmt->execute()) {
                     $message_type = 'success';
                     $message = 'Supplier updated successfully!';
@@ -2055,8 +1519,8 @@ if (isset($_POST['action'])) {
                 }
                 $stmt->close();
             } else {
-                $stmt = $conn->prepare('INSERT INTO suppliers (name, contact_person, phone, email, address) VALUES (?, ?, ?, ?, ?)');
-                $stmt->bind_param('sssss', $name, $contact_person, $phone, $email, $address);
+                $stmt = $conn->prepare("INSERT INTO suppliers (name, contact_person, phone, email, address) VALUES (?, ?, ?, ?, ?)");
+                $stmt->bind_param("sssss", $name, $contact_person, $phone, $email, $address);
                 if ($stmt->execute()) {
                     $message_type = 'success';
                     $message = 'Supplier added successfully!';
@@ -2073,7 +1537,7 @@ if (isset($_POST['action'])) {
             }
             $supplier_id = $_POST['supplier_id'] ?? null;
             if ($supplier_id) {
-                $stmt_check = $conn->prepare('SELECT COUNT(*) FROM purchase_orders WHERE supplier_id = ?');
+                $stmt_check = $conn->prepare("SELECT COUNT(*) FROM purchase_orders WHERE supplier_id = ?");
                 $stmt_check->bind_param('i', $supplier_id);
                 $stmt_check->execute();
                 if ($stmt_check->get_result()->fetch_row()[0] > 0) {
@@ -2082,8 +1546,8 @@ if (isset($_POST['action'])) {
                     break;
                 }
                 $stmt_check->close();
-                $stmt = $conn->prepare('DELETE FROM suppliers WHERE id=?');
-                $stmt->bind_param('i', $supplier_id);
+                $stmt = $conn->prepare("DELETE FROM suppliers WHERE id=?");
+                $stmt->bind_param("i", $supplier_id);
                 if ($stmt->execute()) {
                     $message_type = 'success';
                     $message = 'Supplier deleted successfully!';
@@ -2118,18 +1582,18 @@ if (isset($_POST['action'])) {
             if ($po_id) {
                 $conn->begin_transaction();
                 try {
-                    $stmt = $conn->prepare('UPDATE purchase_orders SET supplier_id=?, user_id=?, status=?, order_date=?, expected_date=?, total_cost=? WHERE id=?');
+                    $stmt = $conn->prepare("UPDATE purchase_orders SET supplier_id=?, user_id=?, status=?, order_date=?, expected_date=?, total_cost=? WHERE id=?");
                     $user_id = $_SESSION['user_id'];
-                    $stmt->bind_param('iisssdi', $supplier_id, $user_id, $status, $order_date, $expected_date, $total_cost, $po_id);
+                    $stmt->bind_param("iisssdi", $supplier_id, $user_id, $status, $order_date, $expected_date, $total_cost, $po_id);
                     $stmt->execute();
                     $stmt->close();
-                    $stmt = $conn->prepare('DELETE FROM po_items WHERE po_id=?');
-                    $stmt->bind_param('i', $po_id);
+                    $stmt = $conn->prepare("DELETE FROM po_items WHERE po_id=?");
+                    $stmt->bind_param("i", $po_id);
                     $stmt->execute();
                     $stmt->close();
-                    $stmt = $conn->prepare('INSERT INTO po_items (po_id, book_id, quantity, cost_per_unit) VALUES (?, ?, ?, ?)');
+                    $stmt = $conn->prepare("INSERT INTO po_items (po_id, book_id, quantity, cost_per_unit) VALUES (?, ?, ?, ?)");
                     foreach ($po_items as $item) {
-                        $stmt->bind_param('iiid', $po_id, $item['bookId'], $item['quantity'], $item['cost_per_unit']);
+                        $stmt->bind_param("iiid", $po_id, $item['bookId'], $item['quantity'], $item['cost_per_unit']);
                         $stmt->execute();
                     }
                     $stmt->close();
@@ -2143,15 +1607,15 @@ if (isset($_POST['action'])) {
             } else {
                 $conn->begin_transaction();
                 try {
-                    $stmt = $conn->prepare('INSERT INTO purchase_orders (supplier_id, user_id, status, order_date, expected_date, total_cost) VALUES (?, ?, ?, ?, ?, ?)');
+                    $stmt = $conn->prepare("INSERT INTO purchase_orders (supplier_id, user_id, status, order_date, expected_date, total_cost) VALUES (?, ?, ?, ?, ?, ?)");
                     $user_id = $_SESSION['user_id'];
-                    $stmt->bind_param('iisssd', $supplier_id, $user_id, $status, $order_date, $expected_date, $total_cost);
+                    $stmt->bind_param("iisssd", $supplier_id, $user_id, $status, $order_date, $expected_date, $total_cost);
                     $stmt->execute();
                     $po_id = $conn->insert_id;
                     $stmt->close();
-                    $stmt = $conn->prepare('INSERT INTO po_items (po_id, book_id, quantity, cost_per_unit) VALUES (?, ?, ?, ?)');
+                    $stmt = $conn->prepare("INSERT INTO po_items (po_id, book_id, quantity, cost_per_unit) VALUES (?, ?, ?, ?)");
                     foreach ($po_items as $item) {
-                        $stmt->bind_param('iiid', $po_id, $item['bookId'], $item['quantity'], $item['cost_per_unit']);
+                        $stmt->bind_param("iiid", $po_id, $item['bookId'], $item['quantity'], $item['cost_per_unit']);
                         $stmt->execute();
                     }
                     $stmt->close();
@@ -2171,8 +1635,8 @@ if (isset($_POST['action'])) {
             }
             $po_id = $_POST['po_id'] ?? null;
             if ($po_id) {
-                $stmt = $conn->prepare('DELETE FROM purchase_orders WHERE id=?');
-                $stmt->bind_param('i', $po_id);
+                $stmt = $conn->prepare("DELETE FROM purchase_orders WHERE id=?");
+                $stmt->bind_param("i", $po_id);
                 if ($stmt->execute()) {
                     $message_type = 'success';
                     $message = 'Purchase Order deleted successfully!';
@@ -2193,19 +1657,19 @@ if (isset($_POST['action'])) {
             if ($po_id) {
                 $conn->begin_transaction();
                 try {
-                    $stmt = $conn->prepare('SELECT status FROM purchase_orders WHERE id = ?');
+                    $stmt = $conn->prepare("SELECT status FROM purchase_orders WHERE id = ?");
                     $stmt->bind_param('i', $po_id);
                     $stmt->execute();
                     $current_status = $stmt->get_result()->fetch_assoc()['status'] ?? null;
                     $stmt->close();
                     if ($current_status !== 'received') {
-                        $stmt_items = $conn->prepare('SELECT book_id, quantity FROM po_items WHERE po_id = ?');
+                        $stmt_items = $conn->prepare("SELECT book_id, quantity FROM po_items WHERE po_id = ?");
                         $stmt_items->bind_param('i', $po_id);
                         $stmt_items->execute();
                         $items = $stmt_items->get_result();
                         while ($item = $items->fetch_assoc()) {
-                            $stmt_update_stock = $conn->prepare('UPDATE books SET stock = stock + ? WHERE id = ?');
-                            $stmt_update_stock->bind_param('ii', $item['quantity'], $item['book_id']);
+                            $stmt_update_stock = $conn->prepare("UPDATE books SET stock = stock + ? WHERE id = ?");
+                            $stmt_update_stock->bind_param("ii", $item['quantity'], $item['book_id']);
                             $stmt_update_stock->execute();
                             $stmt_update_stock->close();
                         }
@@ -2248,13 +1712,13 @@ if (isset($_POST['action'])) {
                 $subtotal = 0;
                 $total_discount = 0;
                 foreach ($cart_items as &$cart_item) {
-                    $stmt_book = $conn->prepare('SELECT stock, price, category FROM books WHERE id = ?');
-                    $stmt_book->bind_param('i', $cart_item['bookId']);
+                    $stmt_book = $conn->prepare("SELECT stock, price, category FROM books WHERE id = ?");
+                    $stmt_book->bind_param("i", $cart_item['bookId']);
                     $stmt_book->execute();
                     $book_data = $stmt_book->get_result()->fetch_assoc();
                     $stmt_book->close();
                     if (!$book_data || $book_data['stock'] < $cart_item['quantity']) {
-                        throw new Exception('Not enough stock for ' . html($cart_item['name']) . '. Available: ' . ($book_data['stock'] ?? 0) . ', Needed: ' . $cart_item['quantity'] . '.');
+                        throw new Exception("Not enough stock for " . html($cart_item['name']) . ". Available: " . ($book_data['stock'] ?? 0) . ", Needed: " . $cart_item['quantity'] . ".");
                     }
                     $subtotal += $book_data['price'] * $cart_item['quantity'];
                     $cart_item['price_per_unit'] = $book_data['price'];
@@ -2263,8 +1727,8 @@ if (isset($_POST['action'])) {
                 }
                 unset($cart_item);
                 if ($promotion_code) {
-                    $stmt_promo = $conn->prepare('SELECT * FROM promotions WHERE code = ? AND start_date <= CURDATE() AND (end_date IS NULL OR end_date >= CURDATE())');
-                    $stmt_promo->bind_param('s', $promotion_code);
+                    $stmt_promo = $conn->prepare("SELECT * FROM promotions WHERE code = ? AND start_date <= CURDATE() AND (end_date IS NULL OR end_date >= CURDATE())");
+                    $stmt_promo->bind_param("s", $promotion_code);
                     $stmt_promo->execute();
                     $promotion = $stmt_promo->get_result()->fetch_assoc();
                     $stmt_promo->close();
@@ -2306,19 +1770,19 @@ if (isset($_POST['action'])) {
                 }
                 $final_total = $subtotal - $total_discount;
                 $final_total = max(0, $final_total);
-                $stmt_sale = $conn->prepare('INSERT INTO sales (customer_id, user_id, subtotal, discount, total, promotion_code) VALUES (?, ?, ?, ?, ?, ?)');
+                $stmt_sale = $conn->prepare("INSERT INTO sales (customer_id, user_id, subtotal, discount, total, promotion_code) VALUES (?, ?, ?, ?, ?, ?)");
                 $user_id = $_SESSION['user_id'] ?? null;
-                $stmt_sale->bind_param('iiddds', $customer_id, $user_id, $subtotal, $total_discount, $final_total, $promotion_code);
+                $stmt_sale->bind_param("iiddds", $customer_id, $user_id, $subtotal, $total_discount, $final_total, $promotion_code);
                 $stmt_sale->execute();
                 $sale_id = $conn->insert_id;
                 $stmt_sale->close();
-                $stmt_sale_item = $conn->prepare('INSERT INTO sale_items (sale_id, book_id, quantity, price_per_unit, discount_per_unit) VALUES (?, ?, ?, ?, ?)');
-                $stmt_update_stock = $conn->prepare('UPDATE books SET stock = stock - ? WHERE id = ?');
+                $stmt_sale_item = $conn->prepare("INSERT INTO sale_items (sale_id, book_id, quantity, price_per_unit, discount_per_unit) VALUES (?, ?, ?, ?, ?)");
+                $stmt_update_stock = $conn->prepare("UPDATE books SET stock = stock - ? WHERE id = ?");
                 foreach ($cart_items as $item) {
                     $discount_value_per_unit = $item['discount_per_unit'];
-                    $stmt_sale_item->bind_param('iiidd', $sale_id, $item['bookId'], $item['quantity'], $item['price_per_unit'], $discount_value_per_unit);
+                    $stmt_sale_item->bind_param("iiidd", $sale_id, $item['bookId'], $item['quantity'], $item['price_per_unit'], $discount_value_per_unit);
                     $stmt_sale_item->execute();
-                    $stmt_update_stock->bind_param('ii', $item['quantity'], $item['bookId']);
+                    $stmt_update_stock->bind_param("ii", $item['quantity'], $item['bookId']);
                     $stmt_update_stock->execute();
                 }
                 $stmt_sale_item->close();
@@ -2355,13 +1819,13 @@ if (isset($_POST['action'])) {
                 $subtotal = 0;
                 $total_discount = 0;
                 foreach ($cart_items as &$cart_item) {
-                    $stmt_book = $conn->prepare('SELECT stock, price, category FROM books WHERE id = ?');
-                    $stmt_book->bind_param('i', $cart_item['bookId']);
+                    $stmt_book = $conn->prepare("SELECT stock, price, category FROM books WHERE id = ?");
+                    $stmt_book->bind_param("i", $cart_item['bookId']);
                     $stmt_book->execute();
                     $book_data = $stmt_book->get_result()->fetch_assoc();
                     $stmt_book->close();
                     if (!$book_data || $book_data['stock'] < $cart_item['quantity']) {
-                        throw new Exception('Not enough stock for ' . html($cart_item['name']) . '. Available: ' . ($book_data['stock'] ?? 0) . ', Needed: ' . $cart_item['quantity'] . '.');
+                        throw new Exception("Not enough stock for " . html($cart_item['name']) . ". Available: " . ($book_data['stock'] ?? 0) . ", Needed: " . $cart_item['quantity'] . ".");
                     }
                     $subtotal += $book_data['price'] * $cart_item['quantity'];
                     $cart_item['price_per_unit'] = $book_data['price'];
@@ -2370,8 +1834,8 @@ if (isset($_POST['action'])) {
                 }
                 unset($cart_item);
                 if ($promotion_code) {
-                    $stmt_promo = $conn->prepare('SELECT * FROM promotions WHERE code = ? AND start_date <= CURDATE() AND (end_date IS NULL OR end_date >= CURDATE())');
-                    $stmt_promo->bind_param('s', $promotion_code);
+                    $stmt_promo = $conn->prepare("SELECT * FROM promotions WHERE code = ? AND start_date <= CURDATE() AND (end_date IS NULL OR end_date >= CURDATE())");
+                    $stmt_promo->bind_param("s", $promotion_code);
                     $stmt_promo->execute();
                     $promotion = $stmt_promo->get_result()->fetch_assoc();
                     $stmt_promo->close();
@@ -2414,14 +1878,14 @@ if (isset($_POST['action'])) {
                 $final_total = $subtotal - $total_discount;
                 $final_total = max(0, $final_total);
                 $stmt_order = $conn->prepare("INSERT INTO online_orders (customer_id, subtotal, discount, total, promotion_code, status) VALUES (?, ?, ?, ?, ?, 'pending')");
-                $stmt_order->bind_param('iddds', $customer_id, $subtotal, $total_discount, $final_total, $promotion_code);
+                $stmt_order->bind_param("iddds", $customer_id, $subtotal, $total_discount, $final_total, $promotion_code);
                 $stmt_order->execute();
                 $order_id = $conn->insert_id;
                 $stmt_order->close();
-                $stmt_order_item = $conn->prepare('INSERT INTO online_order_items (order_id, book_id, quantity, price_per_unit, discount_per_unit) VALUES (?, ?, ?, ?, ?)');
+                $stmt_order_item = $conn->prepare("INSERT INTO online_order_items (order_id, book_id, quantity, price_per_unit, discount_per_unit) VALUES (?, ?, ?, ?, ?)");
                 foreach ($cart_items as $item) {
                     $discount_value_per_unit = $item['discount_per_unit'];
-                    $stmt_order_item->bind_param('iiidd', $order_id, $item['bookId'], $item['quantity'], $item['price_per_unit'], $discount_value_per_unit);
+                    $stmt_order_item->bind_param("iiidd", $order_id, $item['bookId'], $item['quantity'], $item['price_per_unit'], $discount_value_per_unit);
                     $stmt_order_item->execute();
                 }
                 $stmt_order_item->close();
@@ -2453,35 +1917,35 @@ if (isset($_POST['action'])) {
                 $order = $stmt_order->get_result()->fetch_assoc();
                 $stmt_order->close();
                 if (!$order) {
-                    throw new Exception('Online order not found or already processed.');
+                    throw new Exception("Online order not found or already processed.");
                 }
-                $stmt_items = $conn->prepare('SELECT * FROM online_order_items WHERE order_id = ?');
+                $stmt_items = $conn->prepare("SELECT * FROM online_order_items WHERE order_id = ?");
                 $stmt_items->bind_param('i', $order_id);
                 $stmt_items->execute();
                 $items = $stmt_items->get_result()->fetch_all(MYSQLI_ASSOC);
                 $stmt_items->close();
                 foreach ($items as $item) {
-                    $stmt_book = $conn->prepare('SELECT stock, name FROM books WHERE id = ?');
+                    $stmt_book = $conn->prepare("SELECT stock, name FROM books WHERE id = ?");
                     $stmt_book->bind_param('i', $item['book_id']);
                     $stmt_book->execute();
                     $book_data = $stmt_book->get_result()->fetch_assoc();
                     $stmt_book->close();
                     if (!$book_data || $book_data['stock'] < $item['quantity']) {
-                        throw new Exception('Not enough stock for ' . html($book_data['name']) . ' for order ' . $order_id . '.');
+                        throw new Exception("Not enough stock for " . html($book_data['name']) . " for order " . $order_id . ".");
                     }
                 }
                 $user_id = $_SESSION['user_id'];
-                $stmt_sale = $conn->prepare('INSERT INTO sales (customer_id, user_id, sale_date, subtotal, discount, total, promotion_code) VALUES (?, ?, ?, ?, ?, ?, ?)');
-                $stmt_sale->bind_param('iisddds', $order['customer_id'], $user_id, $order['order_date'], $order['subtotal'], $order['discount'], $order['total'], $order['promotion_code']);
+                $stmt_sale = $conn->prepare("INSERT INTO sales (customer_id, user_id, sale_date, subtotal, discount, total, promotion_code) VALUES (?, ?, ?, ?, ?, ?, ?)");
+                $stmt_sale->bind_param("iisddds", $order['customer_id'], $user_id, $order['order_date'], $order['subtotal'], $order['discount'], $order['total'], $order['promotion_code']);
                 $stmt_sale->execute();
                 $sale_id = $conn->insert_id;
                 $stmt_sale->close();
-                $stmt_sale_item = $conn->prepare('INSERT INTO sale_items (sale_id, book_id, quantity, price_per_unit, discount_per_unit) VALUES (?, ?, ?, ?, ?)');
-                $stmt_update_stock = $conn->prepare('UPDATE books SET stock = stock - ? WHERE id = ?');
+                $stmt_sale_item = $conn->prepare("INSERT INTO sale_items (sale_id, book_id, quantity, price_per_unit, discount_per_unit) VALUES (?, ?, ?, ?, ?)");
+                $stmt_update_stock = $conn->prepare("UPDATE books SET stock = stock - ? WHERE id = ?");
                 foreach ($items as $item) {
-                    $stmt_sale_item->bind_param('iiidd', $sale_id, $item['book_id'], $item['quantity'], $item['price_per_unit'], $item['discount_per_unit']);
+                    $stmt_sale_item->bind_param("iiidd", $sale_id, $item['book_id'], $item['quantity'], $item['price_per_unit'], $item['discount_per_unit']);
                     $stmt_sale_item->execute();
-                    $stmt_update_stock->bind_param('ii', $item['quantity'], $item['book_id']);
+                    $stmt_update_stock->bind_param("ii", $item['quantity'], $item['book_id']);
                     $stmt_update_stock->execute();
                 }
                 $stmt_sale_item->close();
@@ -2558,7 +2022,7 @@ if (isset($_POST['action'])) {
             } else {
                 $applies_to_value = null;
             }
-            $stmt_check = $conn->prepare('SELECT id FROM promotions WHERE code = ? AND id != ?');
+            $stmt_check = $conn->prepare("SELECT id FROM promotions WHERE code = ? AND id != ?");
             $stmt_check->bind_param('si', $code, $promotion_id);
             $stmt_check->execute();
             if ($stmt_check->get_result()->num_rows > 0) {
@@ -2568,8 +2032,8 @@ if (isset($_POST['action'])) {
             }
             $stmt_check->close();
             if ($promotion_id) {
-                $stmt = $conn->prepare('UPDATE promotions SET code=?, type=?, value=?, applies_to=?, applies_to_value=?, start_date=?, end_date=? WHERE id=?');
-                $stmt->bind_param('ssdsissi', $code, $type, $value, $applies_to, $applies_to_value, $start_date, $end_date, $promotion_id);
+                $stmt = $conn->prepare("UPDATE promotions SET code=?, type=?, value=?, applies_to=?, applies_to_value=?, start_date=?, end_date=? WHERE id=?");
+                $stmt->bind_param("ssdsissi", $code, $type, $value, $applies_to, $applies_to_value, $start_date, $end_date, $promotion_id);
                 if ($stmt->execute()) {
                     $message_type = 'success';
                     $message = 'Promotion updated successfully!';
@@ -2578,8 +2042,8 @@ if (isset($_POST['action'])) {
                 }
                 $stmt->close();
             } else {
-                $stmt = $conn->prepare('INSERT INTO promotions (code, type, value, applies_to, applies_to_value, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?)');
-                $stmt->bind_param('ssdsiss', $code, $type, $value, $applies_to, $applies_to_value, $start_date, $end_date);
+                $stmt = $conn->prepare("INSERT INTO promotions (code, type, value, applies_to, applies_to_value, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?)");
+                $stmt->bind_param("ssdsiss", $code, $type, $value, $applies_to, $applies_to_value, $start_date, $end_date);
                 if ($stmt->execute()) {
                     $message_type = 'success';
                     $message = 'Promotion added successfully!';
@@ -2596,7 +2060,7 @@ if (isset($_POST['action'])) {
             }
             $promotion_id = $_POST['promotion_id'] ?? null;
             if ($promotion_id) {
-                $stmt_check = $conn->prepare('SELECT COUNT(*) FROM sales WHERE promotion_code IN (SELECT code FROM promotions WHERE id = ?)');
+                $stmt_check = $conn->prepare("SELECT COUNT(*) FROM sales WHERE promotion_code IN (SELECT code FROM promotions WHERE id = ?)");
                 $stmt_check->bind_param('i', $promotion_id);
                 $stmt_check->execute();
                 if ($stmt_check->get_result()->fetch_row()[0] > 0) {
@@ -2605,8 +2069,8 @@ if (isset($_POST['action'])) {
                     break;
                 }
                 $stmt_check->close();
-                $stmt = $conn->prepare('DELETE FROM promotions WHERE id=?');
-                $stmt->bind_param('i', $promotion_id);
+                $stmt = $conn->prepare("DELETE FROM promotions WHERE id=?");
+                $stmt->bind_param("i", $promotion_id);
                 if ($stmt->execute()) {
                     $message_type = 'success';
                     $message = 'Promotion deleted successfully!';
@@ -2637,9 +2101,9 @@ if (isset($_POST['action'])) {
                 break;
             }
             if ($expense_id) {
-                $stmt = $conn->prepare('UPDATE expenses SET user_id=?, category=?, description=?, amount=?, expense_date=? WHERE id=?');
+                $stmt = $conn->prepare("UPDATE expenses SET user_id=?, category=?, description=?, amount=?, expense_date=? WHERE id=?");
                 $user_id = $_SESSION['user_id'];
-                $stmt->bind_param('isdsdi', $user_id, $category, $description, $amount, $date, $expense_id);
+                $stmt->bind_param("isdsdi", $user_id, $category, $description, $amount, $date, $expense_id);
                 if ($stmt->execute()) {
                     $message_type = 'success';
                     $message = 'Expense updated successfully!';
@@ -2648,9 +2112,9 @@ if (isset($_POST['action'])) {
                 }
                 $stmt->close();
             } else {
-                $stmt = $conn->prepare('INSERT INTO expenses (user_id, category, description, amount, expense_date) VALUES (?, ?, ?, ?, ?)');
+                $stmt = $conn->prepare("INSERT INTO expenses (user_id, category, description, amount, expense_date) VALUES (?, ?, ?, ?, ?)");
                 $user_id = $_SESSION['user_id'];
-                $stmt->bind_param('isds', $user_id, $category, $description, $amount, $date);
+                $stmt->bind_param("isds", $user_id, $category, $description, $amount, $date);
                 if ($stmt->execute()) {
                     $message_type = 'success';
                     $message = 'Expense added successfully!';
@@ -2667,8 +2131,8 @@ if (isset($_POST['action'])) {
             }
             $expense_id = $_POST['expense_id'] ?? null;
             if ($expense_id) {
-                $stmt = $conn->prepare('DELETE FROM expenses WHERE id=?');
-                $stmt->bind_param('i', $expense_id);
+                $stmt = $conn->prepare("DELETE FROM expenses WHERE id=?");
+                $stmt->bind_param("i", $expense_id);
                 if ($stmt->execute()) {
                     $message_type = 'success';
                     $message = 'Expense deleted successfully!';
@@ -2700,9 +2164,9 @@ if (isset($_POST['action'])) {
             ];
             $conn->begin_transaction();
             try {
-                $stmt = $conn->prepare('INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?');
+                $stmt = $conn->prepare("INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?");
                 foreach ($new_settings as $key => $value) {
-                    $stmt->bind_param('sss', $key, $value, $value);
+                    $stmt->bind_param("sss", $key, $value, $value);
                     $stmt->execute();
                 }
                 $stmt->close();
@@ -2735,8 +2199,8 @@ if (isset($_POST['action'])) {
             $skipped_count = 0;
             $conn->begin_transaction();
             try {
-                $stmt_insert = $conn->prepare('INSERT INTO books (name, product_type, author, category, isbn, publisher, year, price, stock, description, cover_image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-                $stmt_update = $conn->prepare('UPDATE books SET name=?, product_type=?, author=?, category=?, publisher=?, year=?, price=?, stock=?, description=?, cover_image=? WHERE isbn=?');
+                $stmt_insert = $conn->prepare("INSERT INTO books (name, product_type, author, category, isbn, publisher, year, price, stock, description, cover_image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                $stmt_update = $conn->prepare("UPDATE books SET name=?, product_type=?, author=?, category=?, publisher=?, year=?, price=?, stock=?, description=?, cover_image=? WHERE isbn=?");
                 foreach ($books_data as $book) {
                     if (!isset($book['name']) || !isset($book['price']) || !isset($book['stock'])) {
                         $skipped_count++;
@@ -2747,11 +2211,11 @@ if (isset($_POST['action'])) {
                     $stmt_check = null;
                     $existing_book_id = null;
                     if ($book['product_type'] == 'book' && isset($book['isbn']) && !empty($book['isbn'])) {
-                        $stmt_check = $conn->prepare('SELECT id FROM books WHERE isbn = ?');
-                        $stmt_check->bind_param('s', $book['isbn']);
+                        $stmt_check = $conn->prepare("SELECT id FROM books WHERE isbn = ?");
+                        $stmt_check->bind_param("s", $book['isbn']);
                     } else if (isset($book['name']) && !empty($book['name'])) {
-                        $stmt_check = $conn->prepare('SELECT id FROM books WHERE name = ? AND product_type = ?');
-                        $stmt_check->bind_param('ss', $book['name'], $book['product_type']);
+                        $stmt_check = $conn->prepare("SELECT id FROM books WHERE name = ? AND product_type = ?");
+                        $stmt_check->bind_param("ss", $book['name'], $book['product_type']);
                     }
                     if ($stmt_check) {
                         $stmt_check->execute();
@@ -2761,7 +2225,7 @@ if (isset($_POST['action'])) {
                     if ($existing_book_id) {
                         if ($conflict_resolution === 'update') {
                             $stmt_update->bind_param(
-                                'ssssidddsss',
+                                "ssssidddsss",
                                 $book['name'],
                                 $book['product_type'],
                                 $book['author'] ?? null,
@@ -2781,7 +2245,7 @@ if (isset($_POST['action'])) {
                         }
                     } else {
                         $stmt_insert->bind_param(
-                            'sssssiddds',
+                            "sssssiddds",
                             $book['name'],
                             $book['product_type'],
                             $book['author'] ?? null,
@@ -2829,15 +2293,15 @@ if (isset($_POST['action'])) {
             $skipped_count = 0;
             $conn->begin_transaction();
             try {
-                $stmt_insert = $conn->prepare('INSERT INTO customers (name, phone, email, password_hash, address, is_active) VALUES (?, ?, ?, ?, ?, ?)');
-                $stmt_update = $conn->prepare('UPDATE customers SET name=?, phone=?, password_hash=?, address=?, is_active=? WHERE email=?');
+                $stmt_insert = $conn->prepare("INSERT INTO customers (name, phone, email, password_hash, address, is_active) VALUES (?, ?, ?, ?, ?, ?)");
+                $stmt_update = $conn->prepare("UPDATE customers SET name=?, phone=?, password_hash=?, address=?, is_active=? WHERE email=?");
                 foreach ($customers_data as $customer) {
                     if (!isset($customer['name']) || !isset($customer['email']) || !isset($customer['password'])) {
                         $skipped_count++;
                         continue;
                     }
-                    $stmt_check = $conn->prepare('SELECT id FROM customers WHERE email = ?');
-                    $stmt_check->bind_param('s', $customer['email']);
+                    $stmt_check = $conn->prepare("SELECT id FROM customers WHERE email = ?");
+                    $stmt_check->bind_param("s", $customer['email']);
                     $stmt_check->execute();
                     $existing_customer_id = $stmt_check->get_result()->fetch_assoc()['id'] ?? null;
                     $stmt_check->close();
@@ -2846,9 +2310,9 @@ if (isset($_POST['action'])) {
                         if ($conflict_resolution === 'update') {
                             $phone = $customer['phone'] ?? null;
                             $address = $customer['address'] ?? null;
-                            $is_active = (int) ($customer['is_active'] ?? 1);
+                            $is_active = (int)($customer['is_active'] ?? 1);
                             $stmt_update->bind_param(
-                                'ssssis',
+                                "ssssis",
                                 $customer['name'],
                                 $phone,
                                 $password_hash,
@@ -2863,7 +2327,7 @@ if (isset($_POST['action'])) {
                         }
                     } else {
                         $stmt_insert->bind_param(
-                            'sssssi',
+                            "sssssi",
                             $customer['name'],
                             $customer['phone'] ?? null,
                             $customer['email'],
@@ -2906,22 +2370,22 @@ if (isset($_POST['action'])) {
             $skipped_count = 0;
             $conn->begin_transaction();
             try {
-                $stmt_insert = $conn->prepare('INSERT INTO suppliers (name, contact_person, phone, email, address) VALUES (?, ?, ?, ?, ?)');
-                $stmt_update = $conn->prepare('UPDATE suppliers SET name=?, contact_person=?, phone=?, address=? WHERE email=?');
+                $stmt_insert = $conn->prepare("INSERT INTO suppliers (name, contact_person, phone, email, address) VALUES (?, ?, ?, ?, ?)");
+                $stmt_update = $conn->prepare("UPDATE suppliers SET name=?, contact_person=?, phone=?, address=? WHERE email=?");
                 foreach ($suppliers_data as $supplier) {
                     if (!isset($supplier['name']) || !isset($supplier['email'])) {
                         $skipped_count++;
                         continue;
                     }
-                    $stmt_check = $conn->prepare('SELECT id FROM suppliers WHERE email = ?');
-                    $stmt_check->bind_param('s', $supplier['email']);
+                    $stmt_check = $conn->prepare("SELECT id FROM suppliers WHERE email = ?");
+                    $stmt_check->bind_param("s", $supplier['email']);
                     $stmt_check->execute();
                     $existing_supplier_id = $stmt_check->get_result()->fetch_assoc()['id'] ?? null;
                     $stmt_check->close();
                     if ($existing_supplier_id) {
                         if ($conflict_resolution === 'update') {
                             $stmt_update->bind_param(
-                                'sssss',
+                                "sssss",
                                 $supplier['name'],
                                 $supplier['contact_person'] ?? null,
                                 $supplier['phone'] ?? null,
@@ -2935,7 +2399,7 @@ if (isset($_POST['action'])) {
                         }
                     } else {
                         $stmt_insert->bind_param(
-                            'sssss',
+                            "sssss",
                             $supplier['name'],
                             $supplier['contact_person'] ?? null,
                             $supplier['phone'] ?? null,
@@ -2964,11 +2428,11 @@ if (isset($_POST['action'])) {
             $all_data = [];
             $tables = ['users', 'books', 'customers', 'suppliers', 'sales', 'sale_items', 'purchase_orders', 'po_items', 'expenses', 'promotions', 'settings', 'online_orders', 'online_order_items'];
             foreach ($tables as $table) {
-                $result = $conn->query('SELECT * FROM ' . $table);
+                $result = $conn->query("SELECT * FROM " . $table);
                 if ($result) {
                     $all_data[$table] = $result->fetch_all(MYSQLI_ASSOC);
                 } else {
-                    error_log('Failed to fetch data for table: ' . $table . ' - ' . $conn->error);
+                    error_log("Failed to fetch data for table: " . $table . " - " . $conn->error);
                 }
             }
             header('Content-Type: application/json');
@@ -2994,18 +2458,17 @@ if (isset($_POST['action'])) {
             $tables_delete_order = array_reverse($tables_in_order);
             $conn->begin_transaction();
             try {
-                $conn->query('SET FOREIGN_KEY_CHECKS = 0');
+                $conn->query("SET FOREIGN_KEY_CHECKS = 0");
                 foreach ($tables_delete_order as $table) {
-                    $conn->query('TRUNCATE TABLE ' . $table);
+                    $conn->query("TRUNCATE TABLE " . $table);
                 }
                 foreach ($tables_in_order as $table) {
                     if (isset($imported_data[$table]) && is_array($imported_data[$table])) {
-                        if (empty($imported_data[$table]))
-                            continue;
+                        if (empty($imported_data[$table])) continue;
                         $columns = array_keys($imported_data[$table][0]);
                         $placeholders = implode(', ', array_fill(0, count($columns), '?'));
                         $column_names = implode(', ', $columns);
-                        $stmt = $conn->prepare('INSERT INTO ' . $table . ' (' . $column_names . ') VALUES (' . $placeholders . ')');
+                        $stmt = $conn->prepare("INSERT INTO " . $table . " (" . $column_names . ") VALUES (" . $placeholders . ")");
                         $types = '';
                         foreach ($columns as $col) {
                             $sample_value = $imported_data[$table][0][$col];
@@ -3024,7 +2487,7 @@ if (isset($_POST['action'])) {
                             foreach ($columns as $col) {
                                 $value = $row[$col];
                                 if (is_bool($value)) {
-                                    $values[] = (int) $value;
+                                    $values[] = (int)$value;
                                 } else {
                                     $values[] = $value;
                                 }
@@ -3035,184 +2498,14 @@ if (isset($_POST['action'])) {
                         $stmt->close();
                     }
                 }
-                $conn->query('SET FOREIGN_KEY_CHECKS = 1');
+                $conn->query("SET FOREIGN_KEY_CHECKS = 1");
                 $conn->commit();
                 $message_type = 'success';
                 $message = 'All data imported successfully!';
             } catch (Exception $e) {
                 $conn->rollback();
-                $conn->query('SET FOREIGN_KEY_CHECKS = 1');
+                $conn->query("SET FOREIGN_KEY_CHECKS = 1");
                 $message = 'Error during data import: ' . $e->getMessage();
-            }
-            break;
-        case 'save_public_sale_link':
-            if (!isAdmin()) {
-                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                redirect('dashboard');
-            }
-            $link_id = $_POST['link_id'] ?? null;
-            $link_name = trim($_POST['link_name'] ?? '');
-            $access_password = $_POST['access_password'] ?? '';
-            $price_mode = ($_POST['price_mode'] ?? 'retail') === 'wholesale' ? 'wholesale' : 'retail';
-            $notes = trim($_POST['notes'] ?? '');
-            $is_active = isset($_POST['is_active']) ? 1 : 0;
-            if ($link_name === '') {
-                $message = 'Link name is required.';
-                break;
-            }
-            if (!$link_id && $access_password === '') {
-                $message = 'Password is required for a new public sale link.';
-                break;
-            }
-            if ($link_id) {
-                if ($access_password !== '') {
-                    $password_hash = password_hash($access_password, PASSWORD_BCRYPT);
-                    $stmt = $conn->prepare('UPDATE public_sale_links SET link_name=?, password_hash=?, price_mode=?, notes=?, is_active=? WHERE id=?');
-                    $stmt->bind_param('ssssii', $link_name, $password_hash, $price_mode, $notes, $is_active, $link_id);
-                } else {
-                    $stmt = $conn->prepare('UPDATE public_sale_links SET link_name=?, price_mode=?, notes=?, is_active=? WHERE id=?');
-                    $stmt->bind_param('sssii', $link_name, $price_mode, $notes, $is_active, $link_id);
-                }
-                if ($stmt->execute()) {
-                    $message_type = 'success';
-                    $message = 'Public sale link updated successfully.';
-                } else {
-                    $message = 'Failed to update public sale link: ' . $stmt->error;
-                }
-                $stmt->close();
-            } else {
-                $token = str_replace('-', '', generate_uuid()) . substr(md5(uniqid((string) mt_rand(), true)), 0, 8);
-                $password_hash = password_hash($access_password, PASSWORD_BCRYPT);
-                $created_by = $_SESSION['user_id'];
-                $stmt = $conn->prepare('INSERT INTO public_sale_links (token, link_name, password_hash, price_mode, created_by, notes, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)');
-                $stmt->bind_param('ssssisi', $token, $link_name, $password_hash, $price_mode, $created_by, $notes, $is_active);
-                if ($stmt->execute()) {
-                    $message_type = 'success';
-                    $message = 'Public sale link created successfully.';
-                } else {
-                    $message = 'Failed to create public sale link: ' . $stmt->error;
-                }
-                $stmt->close();
-            }
-            break;
-        case 'delete_public_sale_link':
-            if (!isAdmin()) {
-                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                redirect('dashboard');
-            }
-            $link_id = (int) ($_POST['link_id'] ?? 0);
-            if ($link_id <= 0) {
-                $message = 'Link ID not provided.';
-                break;
-            }
-            $stmt = $conn->prepare('DELETE FROM public_sale_links WHERE id = ?');
-            $stmt->bind_param('i', $link_id);
-            if ($stmt->execute()) {
-                $message_type = 'success';
-                $message = 'Public sale link deleted.';
-            } else {
-                $message = 'Failed to delete public sale link: ' . $stmt->error;
-            }
-            $stmt->close();
-            break;
-        case 'toggle_public_sale_link':
-            if (!isAdmin()) {
-                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                redirect('dashboard');
-            }
-            $link_id = (int) ($_POST['link_id'] ?? 0);
-            $current_status = (int) ($_POST['current_status'] ?? 0);
-            $new_status = $current_status ? 0 : 1;
-            $stmt = $conn->prepare('UPDATE public_sale_links SET is_active = ? WHERE id = ?');
-            $stmt->bind_param('ii', $new_status, $link_id);
-            if ($stmt->execute()) {
-                $message_type = 'success';
-                $message = 'Public sale link status updated.';
-            } else {
-                $message = 'Failed to update public sale link status: ' . $stmt->error;
-            }
-            $stmt->close();
-            break;
-        case 'public_sale_login':
-            $token = trim($_POST['token'] ?? '');
-            $access_password = $_POST['access_password'] ?? '';
-            $link = current_public_sale_link($conn, $token);
-            if (!$link || !password_verify($access_password, $link['password_hash'])) {
-                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Invalid password or inactive sale link.'];
-                redirect('public-sale', ['token' => $token]);
-            }
-            if (!isset($_SESSION['public_sale_access'])) {
-                $_SESSION['public_sale_access'] = [];
-            }
-            $_SESSION['public_sale_access'][$token] = [
-                'granted_at' => time(),
-                'link_id' => $link['id'],
-                'price_mode' => $link['price_mode']
-            ];
-            $_SESSION['toast'] = ['type' => 'success', 'message' => 'Secure sale link unlocked.'];
-            redirect('public-sale', ['token' => $token]);
-            break;
-        case 'submit_public_sale':
-            $token = trim($_POST['token'] ?? '');
-            $cart_items_json = $_POST['cart_items'] ?? '[]';
-            $cart_items = json_decode($cart_items_json, true);
-            $link = current_public_sale_link($conn, $token);
-            if (!$link || !has_public_sale_access($token)) {
-                $_SESSION['toast'] = ['type' => 'error', 'message' => 'This sale link is locked or expired.'];
-                redirect('public-sale', ['token' => $token]);
-            }
-            if (empty($cart_items) || !is_array($cart_items)) {
-                $_SESSION['toast'] = ['type' => 'error', 'message' => 'No products in the secure sale cart.'];
-                redirect('public-sale', ['token' => $token]);
-            }
-            $conn->begin_transaction();
-            try {
-                $subtotal = 0;
-                $price_mode = $link['price_mode'];
-                foreach ($cart_items as &$cart_item) {
-                    $book_id = (int) ($cart_item['bookId'] ?? 0);
-                    $stmt_book = $conn->prepare('SELECT id, name, stock, price, COALESCE(retail_price, price) AS retail_price, COALESCE(wholesale_price, price) AS wholesale_price FROM books WHERE id = ? LIMIT 1');
-                    $stmt_book->bind_param('i', $book_id);
-                    $stmt_book->execute();
-                    $book_data = $stmt_book->get_result()->fetch_assoc();
-                    $stmt_book->close();
-                    if (!$book_data || $book_data['stock'] < (int) $cart_item['quantity']) {
-                        throw new Exception('Not enough stock for ' . ($book_data['name'] ?? 'selected product') . '.');
-                    }
-                    $unit_price = $price_mode === 'wholesale' ? ($book_data['wholesale_price'] ?: $book_data['retail_price']) : ($book_data['retail_price'] ?: $book_data['price']);
-                    $cart_item['price_per_unit'] = $unit_price;
-                    $cart_item['quantity'] = (int) $cart_item['quantity'];
-                    $subtotal += ($unit_price * $cart_item['quantity']);
-                }
-                unset($cart_item);
-                $creator_user_id = !empty($link['created_by']) ? (int) $link['created_by'] : null;
-                $promotion_code = 'PUBLIC-LINK-' . $link['id'] . '-' . strtoupper($price_mode);
-                $stmt_sale = $conn->prepare('INSERT INTO sales (customer_id, user_id, subtotal, discount, total, promotion_code) VALUES (NULL, ?, ?, 0, ?, ?)');
-                $stmt_sale->bind_param('idds', $creator_user_id, $subtotal, $subtotal, $promotion_code);
-                $stmt_sale->execute();
-                $sale_id = $conn->insert_id;
-                $stmt_sale->close();
-                $stmt_sale_item = $conn->prepare('INSERT INTO sale_items (sale_id, book_id, quantity, price_per_unit, discount_per_unit) VALUES (?, ?, ?, ?, 0)');
-                $stmt_stock = $conn->prepare('UPDATE books SET stock = stock - ? WHERE id = ?');
-                foreach ($cart_items as $item) {
-                    $book_id = (int) $item['bookId'];
-                    $quantity = (int) $item['quantity'];
-                    $price_per_unit = (float) $item['price_per_unit'];
-                    $stmt_sale_item->bind_param('iiid', $sale_id, $book_id, $quantity, $price_per_unit);
-                    $stmt_sale_item->execute();
-                    $stmt_stock->bind_param('ii', $quantity, $book_id);
-                    $stmt_stock->execute();
-                }
-                $stmt_sale_item->close();
-                $stmt_stock->close();
-                $conn->commit();
-                $_SESSION['public_sale_last_receipt'][$token] = $sale_id;
-                $_SESSION['toast'] = ['type' => 'success', 'message' => 'Sale completed successfully at ' . strtoupper($price_mode) . ' rate.'];
-                redirect('public-sale', ['token' => $token]);
-            } catch (Exception $e) {
-                $conn->rollback();
-                $_SESSION['toast'] = ['type' => 'error', 'message' => 'Secure sale failed: ' . $e->getMessage()];
-                redirect('public-sale', ['token' => $token]);
             }
             break;
         default:
@@ -3220,13 +2513,13 @@ if (isset($_POST['action'])) {
             break;
     }
     $_SESSION['toast'] = ['type' => $message_type, 'message' => $message];
-    redirect($_GET['page'] ?? 'dashboard', isset($_GET['token']) ? ['token' => $_GET['token']] : []);
+    redirect($_GET['page'] ?? 'dashboard');
 }
 if (isset($_POST['action']) && $_POST['action'] === 'login') {
     $username = $_POST['username'] ?? '';
     $password = $_POST['password'] ?? '';
-    $stmt = $conn->prepare('SELECT id, username, password_hash, role FROM users WHERE username = ?');
-    $stmt->bind_param('s', $username);
+    $stmt = $conn->prepare("SELECT id, username, password_hash, role FROM users WHERE username = ?");
+    $stmt->bind_param("s", $username);
     $stmt->execute();
     $result = $stmt->get_result();
     $user = $result->fetch_assoc();
@@ -3246,8 +2539,8 @@ if (isset($_POST['action']) && $_POST['action'] === 'login') {
 if (isset($_POST['action']) && $_POST['action'] === 'customer_login') {
     $email = $_POST['email'] ?? '';
     $password = $_POST['password'] ?? '';
-    $stmt = $conn->prepare('SELECT id, name, email, password_hash FROM customers WHERE email = ? AND is_active = 1');
-    $stmt->bind_param('s', $email);
+    $stmt = $conn->prepare("SELECT id, name, email, password_hash FROM customers WHERE email = ? AND is_active = 1");
+    $stmt->bind_param("s", $email);
     $stmt->execute();
     $result = $stmt->get_result();
     $customer = $result->fetch_assoc();
@@ -3264,7 +2557,7 @@ if (isset($_POST['action']) && $_POST['action'] === 'customer_login') {
         redirect('customer-login');
     }
 }
-$stmt = $conn->prepare('SELECT COUNT(*) FROM users');
+$stmt = $conn->prepare("SELECT COUNT(*) FROM users");
 $stmt->execute();
 $user_count = $stmt->get_result()->fetch_row()[0];
 $stmt->close();
@@ -3276,29 +2569,29 @@ if ($user_count == 0) {
     try {
         $stmt = $conn->prepare("INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'admin')");
         $username = 'admin';
-        $stmt->bind_param('ss', $username, $admin_password);
+        $stmt->bind_param("ss", $username, $admin_password);
         $stmt->execute();
         $admin_user_id = $conn->insert_id;
         $stmt->close();
         $stmt = $conn->prepare("INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'staff')");
         $username = 'staff';
-        $stmt->bind_param('ss', $username, $staff_password);
+        $stmt->bind_param("ss", $username, $staff_password);
         $stmt->execute();
         $staff_user_id = $conn->insert_id;
         $stmt->close();
         $current_system_user_id = $admin_user_id;
         $sampleBooks = [
-            ['name' => 'The Alchemist', 'product_type' => 'book', 'author' => 'Paulo Coelho', 'category' => 'Fiction', 'isbn' => '978-0061122415', 'publisher' => 'HarperOne', 'year' => 1988, 'price' => 850.0, 'stock' => 12, 'description' => 'A philosophical novel about a young shepherd boy named Santiago who journeys to find a treasure.', 'cover_image' => ''],
-            ['name' => 'Sapiens: A Brief History of Humankind', 'product_type' => 'book', 'author' => 'Yuval Noah Harari', 'category' => 'History', 'isbn' => '978-0062316097', 'publisher' => 'Harper Perennial', 'year' => 2014, 'price' => 1200.0, 'stock' => 7, 'description' => 'Explores the history of humanity from the Stone Age to the twenty-first century.', 'cover_image' => ''],
-            ['name' => 'Blue Ballpoint Pen (Pack of 5)', 'product_type' => 'general', 'author' => NULL, 'category' => 'Stationery', 'isbn' => NULL, 'publisher' => NULL, 'year' => NULL, 'price' => 150.0, 'stock' => 50, 'description' => 'Smooth writing blue ballpoint pens, ideal for office and school.', 'cover_image' => ''],
-            ['name' => 'A4 Notebook (100 Pages)', 'product_type' => 'general', 'author' => NULL, 'category' => 'Stationery', 'isbn' => NULL, 'publisher' => NULL, 'year' => NULL, 'price' => 250.0, 'stock' => 30, 'description' => 'High-quality A4 size notebook with 100 ruled pages.', 'cover_image' => ''],
-            ['name' => '1984', 'product_type' => 'book', 'author' => 'George Orwell', 'category' => 'Dystopian', 'isbn' => '978-0451524935', 'publisher' => 'Signet Classic', 'year' => 1949, 'price' => 600.0, 'stock' => 20, 'description' => 'A dystopian social science fiction novel and cautionary tale.', 'cover_image' => ''],
-            ['name' => 'Sticky Notes (Assorted Colors)', 'product_type' => 'general', 'author' => NULL, 'category' => 'Stationery', 'isbn' => NULL, 'publisher' => NULL, 'year' => NULL, 'price' => 100.0, 'stock' => 45, 'description' => 'Colorful sticky notes for reminders and bookmarks.', 'cover_image' => ''],
+            ['name' => 'The Alchemist', 'product_type' => 'book', 'author' => 'Paulo Coelho', 'category' => 'Fiction', 'isbn' => '978-0061122415', 'publisher' => 'HarperOne', 'year' => 1988, 'price' => 850.00, 'stock' => 12, 'description' => 'A philosophical novel about a young shepherd boy named Santiago who journeys to find a treasure.', 'cover_image' => ''],
+            ['name' => 'Sapiens: A Brief History of Humankind', 'product_type' => 'book', 'author' => 'Yuval Noah Harari', 'category' => 'History', 'isbn' => '978-0062316097', 'publisher' => 'Harper Perennial', 'year' => 2014, 'price' => 1200.00, 'stock' => 7, 'description' => 'Explores the history of humanity from the Stone Age to the twenty-first century.', 'cover_image' => ''],
+            ['name' => 'Blue Ballpoint Pen (Pack of 5)', 'product_type' => 'general', 'author' => NULL, 'category' => 'Stationery', 'isbn' => NULL, 'publisher' => NULL, 'year' => NULL, 'price' => 150.00, 'stock' => 50, 'description' => 'Smooth writing blue ballpoint pens, ideal for office and school.', 'cover_image' => ''],
+            ['name' => 'A4 Notebook (100 Pages)', 'product_type' => 'general', 'author' => NULL, 'category' => 'Stationery', 'isbn' => NULL, 'publisher' => NULL, 'year' => NULL, 'price' => 250.00, 'stock' => 30, 'description' => 'High-quality A4 size notebook with 100 ruled pages.', 'cover_image' => ''],
+            ['name' => '1984', 'product_type' => 'book', 'author' => 'George Orwell', 'category' => 'Dystopian', 'isbn' => '978-0451524935', 'publisher' => 'Signet Classic', 'year' => 1949, 'price' => 600.00, 'stock' => 20, 'description' => 'A dystopian social science fiction novel and cautionary tale.', 'cover_image' => ''],
+            ['name' => 'Sticky Notes (Assorted Colors)', 'product_type' => 'general', 'author' => NULL, 'category' => 'Stationery', 'isbn' => NULL, 'publisher' => NULL, 'year' => NULL, 'price' => 100.00, 'stock' => 45, 'description' => 'Colorful sticky notes for reminders and bookmarks.', 'cover_image' => ''],
         ];
         $book_ids = [];
-        $stmt = $conn->prepare('INSERT INTO books (name, product_type, author, category, isbn, publisher, year, price, stock, description, cover_image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $stmt = $conn->prepare("INSERT INTO books (name, product_type, author, category, isbn, publisher, year, price, stock, description, cover_image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         foreach ($sampleBooks as $book) {
-            $stmt->bind_param('sssssiddds', $book['name'], $book['product_type'], $book['author'], $book['category'], $book['isbn'], $book['publisher'], $book['year'], $book['price'], $book['stock'], $book['description'], $book['cover_image']);
+            $stmt->bind_param("sssssiddds", $book['name'], $book['product_type'], $book['author'], $book['category'], $book['isbn'], $book['publisher'], $book['year'], $book['price'], $book['stock'], $book['description'], $book['cover_image']);
             $stmt->execute();
             $book_ids[] = $conn->insert_id;
         }
@@ -3310,9 +2603,9 @@ if ($user_count == 0) {
             ['name' => 'Fatima Zohra', 'phone' => '03451122334', 'email' => 'fatima.z@example.com', 'password_hash' => $customer_password, 'address' => 'Apartment 7, F-10 Markaz, Islamabad', 'is_active' => 0],
         ];
         $customer_ids = [];
-        $stmt = $conn->prepare('INSERT INTO customers (name, phone, email, password_hash, address, is_active) VALUES (?, ?, ?, ?, ?, ?)');
+        $stmt = $conn->prepare("INSERT INTO customers (name, phone, email, password_hash, address, is_active) VALUES (?, ?, ?, ?, ?, ?)");
         foreach ($sampleCustomers as $customer) {
-            $stmt->bind_param('sssssi', $customer['name'], $customer['phone'], $customer['email'], $customer['password_hash'], $customer['address'], $customer['is_active']);
+            $stmt->bind_param("sssssi", $customer['name'], $customer['phone'], $customer['email'], $customer['password_hash'], $customer['address'], $customer['is_active']);
             $stmt->execute();
             $customer_ids[] = $conn->insert_id;
         }
@@ -3324,9 +2617,9 @@ if ($user_count == 0) {
             ['name' => 'Stationery Hub Pvt Ltd', 'contact_person' => 'Hassan Iqbal', 'phone' => '051-5432109', 'email' => 'hassan@stationeryhub.pk', 'address' => 'Blue Area, Islamabad'],
         ];
         $supplier_ids = [];
-        $stmt = $conn->prepare('INSERT INTO suppliers (name, contact_person, phone, email, address) VALUES (?, ?, ?, ?, ?)');
+        $stmt = $conn->prepare("INSERT INTO suppliers (name, contact_person, phone, email, address) VALUES (?, ?, ?, ?, ?)");
         foreach ($sampleSuppliers as $supplier) {
-            $stmt->bind_param('sssss', $supplier['name'], $supplier['contact_person'], $supplier['phone'], $supplier['email'], $supplier['address']);
+            $stmt->bind_param("sssss", $supplier['name'], $supplier['contact_person'], $supplier['phone'], $supplier['email'], $supplier['address']);
             $stmt->execute();
             $supplier_ids[] = $conn->insert_id;
         }
@@ -3336,14 +2629,14 @@ if ($user_count == 0) {
         $expense_date3 = date('Y-m-d', time() - (20 * 24 * 60 * 60));
         $expense_date4 = date('Y-m-d');
         $sampleExpenses = [
-            ['user_id' => $current_system_user_id, 'category' => 'Utilities', 'description' => 'Electricity bill for July', 'amount' => 8500.0, 'expense_date' => $expense_date1],
-            ['user_id' => $current_system_user_id, 'category' => 'Rent', 'description' => 'Monthly shop rent', 'amount' => 50000.0, 'expense_date' => $expense_date2],
-            ['user_id' => $current_system_user_id, 'category' => 'Supplies', 'description' => 'Office stationery and packing material', 'amount' => 3200.0, 'expense_date' => $expense_date3],
-            ['user_id' => $current_system_user_id, 'category' => 'Marketing', 'description' => 'Social media ad campaign for new releases', 'amount' => 15000.0, 'expense_date' => $expense_date4],
+            ['user_id' => $current_system_user_id, 'category' => 'Utilities', 'description' => 'Electricity bill for July', 'amount' => 8500.00, 'expense_date' => $expense_date1],
+            ['user_id' => $current_system_user_id, 'category' => 'Rent', 'description' => 'Monthly shop rent', 'amount' => 50000.00, 'expense_date' => $expense_date2],
+            ['user_id' => $current_system_user_id, 'category' => 'Supplies', 'description' => 'Office stationery and packing material', 'amount' => 3200.00, 'expense_date' => $expense_date3],
+            ['user_id' => $current_system_user_id, 'category' => 'Marketing', 'description' => 'Social media ad campaign for new releases', 'amount' => 15000.00, 'expense_date' => $expense_date4],
         ];
-        $stmt = $conn->prepare('INSERT INTO expenses (user_id, category, description, amount, expense_date) VALUES (?, ?, ?, ?, ?)');
+        $stmt = $conn->prepare("INSERT INTO expenses (user_id, category, description, amount, expense_date) VALUES (?, ?, ?, ?, ?)");
         foreach ($sampleExpenses as $expense) {
-            $stmt->bind_param('isdss', $expense['user_id'], $expense['category'], $expense['description'], $expense['amount'], $expense['expense_date']);
+            $stmt->bind_param("isdss", $expense['user_id'], $expense['category'], $expense['description'], $expense['amount'], $expense['expense_date']);
             $stmt->execute();
         }
         $stmt->close();
@@ -3351,7 +2644,7 @@ if ($user_count == 0) {
         $_SESSION['toast'] = ['type' => 'info', 'message' => 'Initial data (users, products, customers, etc.) added to the database.'];
     } catch (Exception $e) {
         $conn->rollback();
-        error_log('Failed to insert initial data: ' . $e->getMessage());
+        error_log("Failed to insert initial data: " . $e->getMessage());
         $_SESSION['toast'] = ['type' => 'error', 'message' => 'Failed to set up initial data: ' . $e->getMessage()];
     }
 }
@@ -3364,26 +2657,28 @@ if (isLoggedIn()) {
         redirect(isCustomer() ? 'customer-dashboard' : 'dashboard');
     }
 }
-$customer_only_pages = ['customer-dashboard', 'online-shop-cart', 'my-orders'];
-if (isCustomer() && !in_array($page, array_merge($customer_only_pages, ['home', 'books-public', 'about', 'contact', 'public-sale']))) {
-    $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-    redirect('customer-dashboard');
-}
-$app_pages = ['dashboard', 'books', 'users', 'customers', 'suppliers', 'purchase-orders', 'cart', 'sales-history', 'online-orders', 'promotions', 'expenses', 'reports', 'live-sales', 'settings', 'public-sale-links', 'print-barcodes', 'backup-restore'];
-$authenticated_pages = array_merge($app_pages, $customer_only_pages);
-if (isLoggedIn() && !isCustomer() && in_array($page, $app_pages)) {
-    if (!hasAccess($page)) {
-        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access to ' . $page];
+$admin_only_pages = ['suppliers', 'purchase-orders', 'promotions', 'expenses', 'reports', 'backup-restore', 'settings'];
+$staff_restricted_pages = ['customers'];
+$staff_allowed_pages = ['dashboard', 'books', 'cart', 'sales-history', 'online-orders'];
+if (isStaff()) {
+    if (in_array($page, $admin_only_pages)) {
+        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
         redirect('dashboard');
     }
 }
+$customer_only_pages = ['customer-dashboard', 'online-shop-cart', 'my-orders'];
+if (isCustomer() && !in_array($page, array_merge($customer_only_pages, ['home', 'books-public', 'about', 'contact']))) {
+    $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
+    redirect('customer-dashboard');
+}
+$authenticated_pages = array_merge(['dashboard', 'books', 'customers', 'cart', 'sales-history', 'online-orders'], $admin_only_pages, $customer_only_pages);
 if (!isLoggedIn() && in_array($page, $authenticated_pages)) {
     $_SESSION['toast'] = ['type' => 'info', 'message' => 'Please log in to access this page.'];
     $redirect_page = ($page === 'customer-dashboard' || $page === 'online-shop-cart' || $page === 'my-orders') ? 'customer-login' : 'login';
     redirect($redirect_page);
 }
 $public_settings = [];
-$settings_result = $conn->query('SELECT setting_key, setting_value FROM settings');
+$settings_result = $conn->query("SELECT setting_key, setting_value FROM settings");
 if ($settings_result) {
     while ($row = $settings_result->fetch_assoc()) {
         $public_settings[$row['setting_key']] = $row['setting_value'];
@@ -4528,20 +3823,7 @@ if ($settings_result) {
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
         }
-        @keyframes pulse-live {
-            0% { opacity: 1; }
-            50% { opacity: 0.4; }
-            100% { opacity: 1; }
-        }
-        #mobile-nav-toggle {
-            display: none;
-            margin-right: 15px;
-        }
-        @media (max-width: 900px) {
-            #mobile-nav-toggle {
-                display: inline-flex !important;
-            }
-        }
+
         @media (max-width: 992px) {
             aside.sidebar {
                 width: 200px;
@@ -4723,17 +4005,7 @@ if ($settings_result) {
         }
 
         .hamburger-menu {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 38px;
-            height: 38px;
-            border-radius: 10px;
-            background: var(--surface-color);
-            border: 1px solid var(--border-color);
-            color: var(--text-color);
-            cursor: pointer;
-            margin-right: 10px;
+            display: none;
         }
 
         .whatsapp-btn {
@@ -5033,1276 +4305,14 @@ if ($settings_result) {
             max-width: 100vw;
             overflow-x: hidden;
         }
-
-        body.sidebar-collapsed aside.sidebar {
-            width: 88px !important;
-            padding-inline: 12px !important;
-        }
-        body.sidebar-collapsed aside.sidebar h2,
-        body.sidebar-collapsed aside.sidebar nav ul li a span.sidebar-label,
-        body.sidebar-collapsed aside.sidebar .user-info,
-        body.sidebar-collapsed aside.sidebar .dark-mode-toggle,
-        body.sidebar-collapsed aside.sidebar .sidebar-product-navigator {
-            display: none !important;
-        }
-        body.sidebar-collapsed aside.sidebar nav ul li a {
-            justify-content: center;
-            padding-inline: 0 !important;
-        }
-        body.sidebar-collapsed aside.sidebar nav ul li a i {
-            margin-right: 0 !important;
-        }
-        .sidebar-header-row {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 18px;
-        }
-        .sidebar-product-navigator {
-            margin-top: 16px;
-            border-top: 1px solid var(--border-color);
-            padding-top: 14px;
-        }
-        .sidebar-product-navigator .mini-title {
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            color: var(--light-text-color);
-            margin-bottom: 10px;
-        }
-        .sidebar-product-list {
-            max-height: 240px;
-            overflow: auto;
-            display: grid;
-            gap: 8px;
-        }
-        .sidebar-product-chip {
-            border: 1px solid var(--border-color);
-            border-radius: 10px;
-            padding: 8px 10px;
-            background: var(--background-color);
-            cursor: pointer;
-            transition: 0.2s ease;
-        }
-        .sidebar-product-chip:hover {
-            border-color: var(--primary-color);
-            transform: translateY(-1px);
-        }
-        .barcode-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            margin-top: 6px;
-            padding: 4px 8px;
-            border-radius: 999px;
-            background: rgba(42, 157, 143, 0.08);
-            color: var(--primary-color);
-            font-size: 11px;
-            font-weight: 600;
-        }
-        .barcode-print-card {
-            padding: 18px;
-            text-align: center;
-        }
-        .inline-input-group {
-            display: flex;
-            gap: 10px;
-        }
-        .inline-input-group > input,
-        .inline-input-group > select {
-            flex: 1;
-        }
-        .status-pill {
-            display: inline-flex;
-            align-items: center;
-            padding: 4px 10px;
-            border-radius: 999px;
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 0.04em;
-        }
-        .status-pill.success { background: rgba(40,167,69,0.12); color: #198754; }
-        .status-pill.muted { background: rgba(108,117,125,0.12); color: var(--light-text-color); }
-        .secure-link-copy-wrap {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-        }
-        .secure-link-input {
-            width: 100%;
-            min-width: 220px;
-            padding: 8px 10px;
-            border: 1px solid var(--border-color);
-            border-radius: 10px;
-            background: var(--background-color);
-            color: var(--text-color);
-        }
-        .public-sale-shell {
-            display: grid;
-            grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
-            gap: 20px;
-            align-items: start;
-        }
-        .public-sale-products-panel {
-            position: sticky;
-            top: 20px;
-        }
-        .public-sale-product-list {
-            display: grid;
-            gap: 10px;
-            max-height: calc(100vh - 280px);
-            overflow: auto;
-        }
-        .public-sale-product-item {
-            border: 1px solid var(--border-color);
-            border-radius: 14px;
-            padding: 12px;
-            background: var(--background-color);
-            cursor: pointer;
-        }
-        .public-sale-product-item strong {
-            display: block;
-            margin-bottom: 4px;
-        }
-        .public-sale-main { display: grid; gap: 20px; }
-        .public-sale-top-card { overflow: hidden; }
-        .public-sale-header-row {
-            display: flex;
-            align-items: start;
-            justify-content: space-between;
-            gap: 16px;
-            margin-bottom: 16px;
-        }
-        .public-sale-rate-badge {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            padding: 6px 12px;
-            border-radius: 999px;
-            background: rgba(42,157,143,0.12);
-            color: var(--primary-color);
-            font-size: 12px;
-            font-weight: 800;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-        }
-        .public-sale-scanner-grid {
-            display: grid;
-            grid-template-columns: minmax(320px, 1fr) minmax(220px, 320px);
-            gap: 16px;
-            align-items: start;
-        }
-        .public-sale-scanner-box {
-            min-height: 280px;
-            border-radius: 18px;
-            overflow: hidden;
-            background: #0f172a;
-            border: 1px solid rgba(255,255,255,0.08);
-        }
-        .public-sale-status-chip {
-            display: inline-flex;
-            margin-top: 8px;
-            padding: 8px 12px;
-            border-radius: 999px;
-            background: var(--background-color);
-            border: 1px solid var(--border-color);
-            font-size: 12px;
-            font-weight: 600;
-        }
-        .public-sale-summary-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-top: 14px;
-            margin-top: 12px;
-            border-top: 1px solid var(--border-color);
-            font-size: 18px;
-        }
-        .barcode-scan-btn { white-space: nowrap; }
-        @media (max-width: 1100px) {
-            .public-sale-shell,
-            .public-sale-scanner-grid {
-                grid-template-columns: 1fr;
-            }
-            .public-sale-products-panel {
-                position: static;
-            }
-        }
-        @media (max-width: 900px) {
-            aside.sidebar {
-                position: fixed !important;
-                inset: 0 auto 0 0;
-                width: min(86vw, 320px) !important;
-                transform: translateX(-105%);
-                transition: transform 0.25s ease;
-                z-index: 1300;
-                height: 100vh;
-                overflow-y: auto;
-                display: flex !important;
-                flex-direction: column !important;
-                align-items: stretch !important;
-            }
-            body.sidebar-open aside.sidebar,
-            aside.sidebar.active {
-                transform: translateX(0);
-            }
-            .hamburger-menu {
-                display: inline-flex !important;
-                align-items: center;
-                justify-content: center;
-                width: 42px;
-                height: 42px;
-                border-radius: 12px;
-                background: var(--background-color);
-                border: 1px solid var(--border-color);
-            }
-            aside.sidebar nav,
-            aside.sidebar .user-info,
-            aside.sidebar .dark-mode-toggle,
-            aside.sidebar .sidebar-product-navigator,
-            aside.sidebar h2 {
-                display: block !important;
-            }
-            .public-sale-login-card,
-            .public-sale-shell {
-                margin-top: 10px;
-            }
-        }
     </style>
-
-    <style id="minimalist-compact-overrides">
-        :root {
-            --primary-color: #111827;
-            --primary-dark-color: #0f172a;
-            --accent-color: #2563eb;
-            --secondary-accent-color: #dbeafe;
-            --background-color: #f5f7fb;
-            --surface-color: #ffffff;
-            --text-color: #111827;
-            --light-text-color: #6b7280;
-            --border-color: #e5e7eb;
-            --shadow-color: rgba(15, 23, 42, 0.06);
-            --danger-color: #dc2626;
-            --success-color: #059669;
-            --warning-color: #d97706;
-            --info-color: #2563eb;
-            --disabled-color: #cbd5e1;
-            --page-max-width: 1440px;
-        }
-
-        [data-theme='dark'] {
-            --primary-color: #f8fafc;
-            --primary-dark-color: #e2e8f0;
-            --accent-color: #60a5fa;
-            --secondary-accent-color: rgba(96, 165, 250, 0.14);
-            --background-color: #0b1220;
-            --surface-color: #121a2b;
-            --text-color: #e5edf8;
-            --light-text-color: #94a3b8;
-            --border-color: #243047;
-            --shadow-color: rgba(2, 8, 23, 0.32);
-            --danger-color: #f87171;
-            --success-color: #34d399;
-            --warning-color: #fbbf24;
-            --info-color: #60a5fa;
-            --disabled-color: #334155;
-        }
-
-        html {
-            font-size: 15px;
-            scroll-behavior: smooth;
-        }
-
-        body {
-            background: var(--background-color);
-            color: var(--text-color);
-            line-height: 1.45;
-            font-size: 0.95rem;
-        }
-
-        * {
-            scrollbar-width: thin;
-            scrollbar-color: rgba(107, 114, 128, 0.4) transparent;
-        }
-
-        *::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
-
-        *::-webkit-scrollbar-thumb {
-            background: rgba(107, 114, 128, 0.32);
-            border-radius: 999px;
-        }
-
-        #app-container,
-        #public-site-container,
-        #login-container {
-            width: 100%;
-            max-width: var(--page-max-width);
-            margin: 0 auto;
-            background: transparent;
-            box-shadow: none;
-            border-radius: 0;
-            overflow: visible;
-        }
-
-        #login-container {
-            padding: 24px;
-        }
-
-        .login-card,
-        .card,
-        .dashboard-card,
-        .book-card,
-        .modal-content,
-        .mv-card,
-        .contact-form-box,
-        .contact-info-box,
-        .public-content {
-            border: 1px solid var(--border-color);
-            box-shadow: 0 12px 28px var(--shadow-color);
-        }
-
-        .card,
-        .dashboard-card,
-        .public-content,
-        .modal-content,
-        .login-card,
-        .mv-card,
-        .contact-form-box {
-            border-radius: 16px;
-        }
-
-        .card,
-        .public-content,
-        .login-card,
-        .modal-content,
-        .contact-form-box {
-            padding: 16px;
-        }
-
-        .dashboard-card {
-            border-radius: 18px;
-            padding: 18px;
-            min-height: 118px;
-        }
-
-        .dashboard-card h3 {
-            font-size: 0.9rem;
-            margin-bottom: 8px;
-            color: var(--light-text-color);
-            font-weight: 600;
-        }
-
-        .dashboard-card p {
-            font-size: 1.85rem;
-            line-height: 1.1;
-            letter-spacing: -0.03em;
-        }
-
-        aside.sidebar {
-            width: 248px;
-            padding: 16px;
-            background: var(--surface-color);
-            border-right: 1px solid var(--border-color);
-            box-shadow: none;
-            gap: 8px;
-        }
-
-        aside.sidebar h2 {
-            margin-bottom: 14px;
-            padding-bottom: 12px;
-            font-size: 1.05rem;
-            color: var(--text-color);
-            text-align: left;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        aside.sidebar nav ul li {
-            margin-bottom: 4px;
-        }
-
-        aside.sidebar nav ul li a {
-            min-height: 40px;
-            padding: 9px 12px;
-            border-radius: 12px;
-            font-size: 0.92rem;
-            color: var(--light-text-color);
-        }
-
-        aside.sidebar nav ul li a i {
-            width: 18px;
-            margin-right: 10px;
-            font-size: 0.95rem;
-        }
-
-        aside.sidebar nav ul li a:hover,
-        aside.sidebar nav ul li a.active {
-            background: var(--secondary-accent-color);
-            color: var(--text-color);
-            box-shadow: none;
-        }
-
-        .user-info,
-        .dark-mode-toggle {
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            background: rgba(148, 163, 184, 0.05);
-        }
-
-        .user-info {
-            margin-top: 12px;
-            padding: 12px;
-            font-size: 0.82rem;
-        }
-
-        .dark-mode-toggle {
-            margin-top: 10px;
-            padding: 10px 12px;
-        }
-
-        main.content {
-            padding: 18px;
-            background: transparent;
-        }
-
-        .page-header {
-            margin-bottom: 16px;
-            padding-bottom: 12px;
-            border-bottom: 1px solid var(--border-color);
-            gap: 12px;
-        }
-
-        .page-header h1,
-        .card-header {
-            color: var(--text-color);
-            letter-spacing: -0.02em;
-        }
-
-        .page-header h1 {
-            font-size: 1.45rem;
-            font-weight: 700;
-        }
-
-        .card-header {
-            font-size: 1rem;
-            margin-bottom: 12px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .dashboard-grid {
-            gap: 14px;
-            margin-bottom: 16px;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        }
-
-        .btn {
-            min-height: 38px;
-            padding: 8px 14px;
-            font-size: 0.88rem;
-            font-weight: 600;
-            border-radius: 10px;
-            gap: 7px;
-            box-shadow: none;
-        }
-
-        .btn:hover:not(:disabled) {
-            transform: translateY(-1px);
-            box-shadow: 0 8px 18px var(--shadow-color);
-        }
-
-        .btn-primary {
-            background: var(--accent-color);
-            color: #fff;
-        }
-
-        .btn-primary:hover:not(:disabled) {
-            background: #1d4ed8;
-        }
-
-        .btn-secondary {
-            background: var(--surface-color);
-            color: var(--text-color);
-        }
-
-        .btn-danger {
-            background: var(--danger-color);
-        }
-
-        .btn-success {
-            background: var(--success-color);
-        }
-
-        .btn-info {
-            background: var(--info-color);
-        }
-
-        .form-group {
-            margin-bottom: 12px;
-        }
-
-        .form-group label {
-            margin-bottom: 6px;
-            font-size: 0.84rem;
-            font-weight: 600;
-            color: var(--light-text-color);
-        }
-
-        .form-group input[type="text"],
-        .form-group input[type="number"],
-        .form-group input[type="email"],
-        .form-group input[type="tel"],
-        .form-group input[type="url"],
-        .form-group textarea,
-        .form-group select,
-        .form-group input[type="date"],
-        .form-group input[type="month"],
-        .form-group input[type="password"],
-        .global-search-bar input {
-            min-height: 40px;
-            padding: 9px 12px;
-            font-size: 0.9rem;
-            border-radius: 10px;
-            border: 1px solid var(--border-color);
-            background: var(--surface-color);
-            color: var(--text-color);
-            box-shadow: none;
-        }
-
-        .form-group textarea {
-            min-height: 110px;
-            resize: vertical;
-        }
-
-        .form-group input:focus,
-        .form-group textarea:focus,
-        .form-group select:focus,
-        .global-search-bar input:focus {
-            border-color: rgba(37, 99, 235, 0.45);
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.10);
-        }
-
-        .search-sort-controls,
-        .report-filters,
-        .flex-group {
-            gap: 12px;
-        }
-
-        .global-search-bar {
-            position: sticky;
-            top: 0;
-            z-index: 30;
-            margin-bottom: 16px;
-            padding: 12px;
-            background: rgba(255, 255, 255, 0.88);
-            backdrop-filter: blur(8px);
-            border: 1px solid var(--border-color);
-            border-radius: 16px;
-            box-shadow: 0 12px 28px var(--shadow-color);
-        }
-
-        [data-theme='dark'] .global-search-bar {
-            background: rgba(18, 26, 43, 0.9);
-        }
-
-        .global-search-results {
-            position: absolute;
-            top: calc(100% + 6px);
-            left: 12px;
-            right: 12px;
-            border-radius: 14px;
-            border: 1px solid var(--border-color);
-            box-shadow: 0 20px 40px var(--shadow-color);
-            overflow: hidden;
-        }
-
-        .global-search-results div {
-            padding: 10px 12px;
-            font-size: 0.88rem;
-        }
-
-        .data-table {
-            margin-top: 14px;
-            border-radius: 14px;
-            box-shadow: none;
-            border: 1px solid var(--border-color);
-            overflow: hidden;
-        }
-
-        .data-table thead {
-            background: #f8fafc;
-            color: var(--light-text-color);
-        }
-
-        [data-theme='dark'] .data-table thead {
-            background: #162033;
-        }
-
-        .data-table th,
-        .data-table td {
-            padding: 10px 12px;
-            font-size: 0.87rem;
-            vertical-align: middle;
-        }
-
-        .data-table th {
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.03em;
-            font-size: 0.72rem;
-        }
-
-        .data-table td {
-            color: var(--text-color);
-        }
-
-        .data-table tbody tr:hover {
-            background: rgba(37, 99, 235, 0.03);
-        }
-
-        .data-table .actions {
-            gap: 6px;
-            flex-wrap: wrap;
-        }
-
-        .data-table .actions .btn {
-            min-height: 32px;
-            padding: 6px 10px;
-            font-size: 0.78rem;
-            border-radius: 8px;
-        }
-
-        .table-responsive {
-            border-radius: 14px;
-        }
-
-        .pagination {
-            margin-top: 14px;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-
-        .pagination button {
-            min-height: 36px;
-            padding: 8px 12px;
-            border-radius: 10px;
-            font-size: 0.85rem;
-        }
-
-        .modal-content {
-            width: min(560px, calc(100vw - 24px));
-            max-height: calc(100vh - 36px);
-            padding: 18px;
-        }
-
-        .modal-header {
-            margin-bottom: 14px;
-            padding-bottom: 10px;
-        }
-
-        .modal-header h3 {
-            font-size: 1.05rem;
-            color: var(--text-color);
-        }
-
-        .modal-close {
-            width: 34px;
-            height: 34px;
-            border-radius: 10px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            background: transparent;
-        }
-
-        .toast {
-            min-width: 220px;
-            max-width: 340px;
-            padding: 12px 14px;
-            border-radius: 14px;
-            font-size: 0.88rem;
-            box-shadow: 0 18px 32px rgba(15, 23, 42, 0.16);
-        }
-
-        .hero-section,
-        .about-header,
-        .contact-header {
-            border-radius: 24px;
-            box-shadow: none;
-            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-        }
-
-        .hero-section {
-            padding: 40px 28px;
-            margin-bottom: 20px;
-        }
-
-        .hero-section h1 {
-            font-size: clamp(1.8rem, 3vw, 2.8rem);
-            line-height: 1.08;
-            margin-bottom: 14px;
-            text-shadow: none;
-        }
-
-        .hero-section p {
-            max-width: 760px;
-            margin-bottom: 22px;
-            font-size: 0.98rem;
-            color: rgba(255,255,255,0.8);
-        }
-
-        .hero-section .btn-primary {
-            min-height: 42px;
-            padding: 10px 18px;
-            border-radius: 999px;
-            font-size: 0.9rem;
-            background: #fff;
-            color: #111827;
-        }
-
-        .public-header {
-            position: sticky;
-            top: 0;
-            z-index: 40;
-            gap: 12px;
-            padding: 14px 18px;
-            background: rgba(255, 255, 255, 0.9);
-            backdrop-filter: blur(10px);
-            border-bottom: 1px solid var(--border-color);
-            box-shadow: none;
-        }
-
-        [data-theme='dark'] .public-header {
-            background: rgba(11, 18, 32, 0.92);
-        }
-
-        .public-header .logo {
-            font-size: 1.1rem;
-            font-weight: 700;
-            color: var(--text-color);
-        }
-
-        .public-header nav {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .public-header nav ul {
-            gap: 8px;
-            align-items: center;
-            flex-wrap: nowrap;
-            overflow-x: auto;
-            padding-bottom: 2px;
-        }
-
-        .public-header nav ul li {
-            flex: 0 0 auto;
-        }
-
-        .public-header nav ul li a {
-            padding: 8px 10px;
-            font-size: 0.88rem;
-            color: var(--light-text-color);
-            border-radius: 999px;
-            white-space: nowrap;
-        }
-
-        .public-header nav ul li a::after {
-            display: none;
-        }
-
-        .public-header nav ul li a:hover,
-        .public-header nav ul li a.active {
-            background: var(--secondary-accent-color);
-            color: var(--text-color);
-        }
-
-        .public-header .login-btn {
-            padding: 9px 14px;
-            border-radius: 999px;
-            font-size: 0.84rem;
-            background: var(--accent-color);
-            color: #fff;
-        }
-
-        .public-content {
-            width: calc(100% - 24px);
-            max-width: 1220px;
-            margin: 16px auto 0;
-            padding: 18px;
-            background: transparent;
-            box-shadow: none;
-            border: none;
-        }
-
-        .book-grid {
-            gap: 14px;
-            margin-top: 16px;
-            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-        }
-
-        .book-card {
-            padding: 12px;
-            border-radius: 16px;
-            text-align: left;
-            box-shadow: none;
-            background: var(--surface-color);
-        }
-
-        .book-card img {
-            height: 160px;
-            margin-bottom: 12px;
-            border-radius: 12px;
-            padding: 0;
-            background: #f8fafc;
-        }
-
-        .book-card h3 {
-            margin-bottom: 4px;
-            font-size: 0.96rem;
-            line-height: 1.35;
-            white-space: normal;
-        }
-
-        .book-card p,
-        .book-card .stock-info,
-        .feature-item p,
-        .public-footer p,
-        .contact-info-item div h4,
-        .contact-info-item div p,
-        .about-header p,
-        .contact-header p {
-            font-size: 0.84rem;
-        }
-
-        .book-card .price {
-            margin-bottom: 8px;
-            font-size: 1rem;
-            color: var(--text-color);
-        }
-
-        .public-product-actions {
-            gap: 8px;
-            justify-content: flex-start;
-        }
-
-        .public-product-actions .btn,
-        .whatsapp-btn {
-            min-height: 34px;
-            padding: 7px 11px;
-            font-size: 0.8rem;
-            border-radius: 9px;
-        }
-
-        .whatsapp-btn {
-            background: #16a34a;
-        }
-
-        .about-header,
-        .contact-header {
-            margin-bottom: 20px;
-            padding: 32px 20px;
-        }
-
-        .about-header h1,
-        .contact-header h1 {
-            font-size: clamp(1.6rem, 3vw, 2.2rem);
-            margin-bottom: 10px;
-        }
-
-        .mission-vision-container,
-        .features-grid,
-        .contact-wrapper {
-            gap: 16px;
-            margin-bottom: 20px;
-        }
-
-        .mv-card,
-        .contact-info-box,
-        .contact-form-box {
-            padding: 20px;
-            border-radius: 18px;
-        }
-
-        .mv-card i,
-        .feature-item i {
-            font-size: 1.5rem;
-        }
-
-        .mv-card h3,
-        .contact-form-box h3 {
-            font-size: 1.05rem;
-            margin-bottom: 10px;
-        }
-
-        .feature-item {
-            gap: 12px;
-            padding: 16px;
-            border-radius: 14px;
-        }
-
-        .contact-info-item {
-            gap: 12px;
-            margin-bottom: 18px;
-        }
-
-        .contact-info-item i {
-            width: 40px;
-            height: 40px;
-            font-size: 1rem;
-            padding: 0;
-        }
-
-        .map-container {
-            height: 300px;
-            border-radius: 18px;
-            border-width: 1px;
-        }
-
-        .public-footer {
-            margin-top: 18px;
-            padding: 16px 18px;
-            font-size: 0.82rem;
-            background: transparent;
-            box-shadow: none;
-        }
-
-        .login-card {
-            width: min(380px, 100%);
-            padding: 24px;
-        }
-
-        .login-card h2 {
-            font-size: 1.4rem;
-            margin-bottom: 18px;
-        }
-
-        .report-controls,
-        .form-actions,
-        #cart-actions,
-        #online-cart-actions {
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-
-        #cart-summary,
-        #online-cart-summary {
-            margin-top: 16px;
-            padding-top: 14px;
-            font-size: 1rem;
-        }
-
-        .img-preview {
-            width: 88px;
-            height: 88px;
-            border-radius: 12px;
-        }
-
-        .low-stock {
-            background: rgba(217, 119, 6, 0.08) !important;
-            color: var(--warning-color) !important;
-        }
-
-        .inactive-customer {
-            background: rgba(220, 38, 38, 0.08) !important;
-            color: var(--danger-color) !important;
-        }
-
-        .sidebar-backdrop {
-            position: fixed;
-            inset: 0;
-            background: rgba(15, 23, 42, 0.42);
-            opacity: 0;
-            visibility: hidden;
-            transition: opacity 0.2s ease, visibility 0.2s ease;
-            z-index: 998;
-        }
-
-        body.sidebar-open .sidebar-backdrop {
-            opacity: 1;
-            visibility: visible;
-        }
-
-        @media (max-width: 1100px) {
-            aside.sidebar {
-                width: 224px;
-            }
-
-            .dashboard-grid {
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            }
-        }
-
-        @media (max-width: 900px) {
-            html {
-                font-size: 14px;
-            }
-
-            #app-container {
-                flex-direction: column;
-            }
-
-            body aside.sidebar {
-                position: fixed !important;
-                top: 0 !important;
-                left: 0 !important;
-                bottom: 0 !important;
-                width: min(280px, 86vw) !important;
-                height: 100vh !important;
-                padding: 14px !important;
-                transform: translateX(-105%);
-                transition: transform 0.22s ease;
-                z-index: 999;
-                overflow-y: auto;
-                box-shadow: 0 24px 48px rgba(15, 23, 42, 0.16);
-                border-right: 1px solid var(--border-color) !important;
-                background: var(--surface-color) !important;
-                flex-direction: column !important;
-                align-items: stretch !important;
-                justify-content: flex-start !important;
-            }
-
-            body aside.sidebar.active {
-                transform: translateX(0);
-            }
-
-            body aside.sidebar h2 {
-                display: block !important;
-                margin: 0 0 12px 0 !important;
-                font-size: 1rem !important;
-            }
-
-            body aside.sidebar nav {
-                display: block !important;
-                width: 100%;
-                margin-top: 2px;
-            }
-
-            body aside.sidebar .user-info,
-            body aside.sidebar .dark-mode-toggle {
-                display: block !important;
-            }
-
-            .hamburger-menu {
-                display: inline-flex !important;
-                align-items: center;
-                justify-content: center;
-                width: 38px;
-                height: 38px;
-                border-radius: 10px;
-                background: var(--surface-color);
-                border: 1px solid var(--border-color);
-                color: var(--text-color);
-                box-shadow: none;
-            }
-
-            main.content {
-                width: 100%;
-                padding: 14px;
-            }
-
-            .global-search-bar {
-                margin-bottom: 12px;
-                padding: 10px;
-            }
-
-            .page-header {
-                align-items: flex-start;
-            }
-
-            .dashboard-grid,
-            .book-grid,
-            .mission-vision-container,
-            .features-grid,
-            .contact-wrapper {
-                grid-template-columns: 1fr;
-            }
-
-            .public-header {
-                padding: 12px 14px;
-                align-items: flex-start;
-            }
-
-            .public-header > div:last-child {
-                width: 100%;
-                justify-content: flex-start;
-                flex-wrap: wrap;
-            }
-
-            .public-content {
-                width: calc(100% - 16px);
-                margin-top: 10px;
-                padding: 14px;
-            }
-
-            .hero-section,
-            .about-header,
-            .contact-header {
-                padding: 24px 16px;
-                border-radius: 18px;
-            }
-
-            .hero-section h1 {
-                font-size: 1.7rem;
-            }
-
-            .book-grid {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-                gap: 10px;
-            }
-
-            .book-card {
-                padding: 10px;
-            }
-
-            .book-card img {
-                height: 126px;
-            }
-
-            .search-sort-controls,
-            .report-filters,
-            .flex-group,
-            .form-actions,
-            #cart-actions,
-            #online-cart-actions,
-            .report-controls {
-                flex-direction: column;
-                gap: 8px;
-            }
-
-            .search-sort-controls .form-group,
-            .report-filters .form-group,
-            .flex-group .form-group,
-            .form-actions .btn,
-            #cart-actions .btn,
-            #online-cart-actions .btn,
-            .report-controls .btn {
-                width: 100%;
-            }
-
-            .modal-content {
-                width: calc(100vw - 16px);
-                max-height: calc(100vh - 16px);
-                padding: 16px;
-            }
-
-            .table-responsive {
-                overflow: visible;
-            }
-
-            .data-table,
-            .data-table thead,
-            .data-table tbody,
-            .data-table tr,
-            .data-table td {
-                display: block;
-                width: 100%;
-            }
-
-            .data-table thead {
-                display: none;
-            }
-
-            .data-table {
-                border: none;
-                background: transparent;
-                box-shadow: none;
-            }
-
-            .data-table tbody {
-                display: grid;
-                gap: 10px;
-            }
-
-            .data-table tbody tr {
-                background: var(--surface-color);
-                border: 1px solid var(--border-color);
-                border-radius: 14px;
-                box-shadow: 0 10px 22px var(--shadow-color);
-                padding: 10px;
-            }
-
-            .data-table td {
-                border: none;
-                padding: 7px 0 7px 108px;
-                position: relative;
-                min-height: 28px;
-                text-align: left !important;
-                font-size: 0.84rem;
-            }
-
-            .data-table td::before {
-                content: attr(data-label);
-                position: absolute;
-                left: 0;
-                top: 7px;
-                width: 96px;
-                font-size: 0.72rem;
-                font-weight: 700;
-                letter-spacing: 0.03em;
-                text-transform: uppercase;
-                color: var(--light-text-color);
-            }
-
-            .data-table td.actions,
-            .data-table td:last-child {
-                padding-left: 0;
-            }
-
-            .data-table td.actions::before,
-            .data-table td:last-child::before {
-                position: static;
-                display: block;
-                width: auto;
-                margin-bottom: 6px;
-            }
-
-            .data-table .actions {
-                justify-content: flex-start;
-            }
-        }
-
-        @media (max-width: 560px) {
-            .public-header .logo {
-                font-size: 1rem;
-            }
-
-            .book-grid {
-                grid-template-columns: 1fr 1fr;
-            }
-
-            .book-card img {
-                height: 112px;
-            }
-
-            .dashboard-card p {
-                font-size: 1.6rem;
-            }
-
-            .data-table td {
-                padding-left: 92px;
-            }
-
-            .data-table td::before {
-                width: 80px;
-            }
-
-            .login-card {
-                padding: 18px;
-            }
-        }
-    </style>
-
 </head>
 
 <body>
-    <?php if ($page === 'login' || $page === 'customer-login' || $page === 'customer-register'): ?>
+    <?php if ($page === 'login' || $page === 'customer-login' || $page === 'customer-register') : ?>
         <div id="login-container">
             <div class="login-card">
-                <?php if ($page === 'login'): ?>
+                <?php if ($page === 'login') : ?>
                     <h2><?php echo html($public_settings['system_name'] ?? 'General Store & Bookshop'); ?> Login</h2>
                     <form action="index.php" method="POST">
                         <input type="hidden" name="action" value="login">
@@ -6316,7 +4326,7 @@ if ($settings_result) {
                         </div>
                         <button type="submit" class="btn btn-primary">Login</button>
                     </form>
-                <?php elseif ($page === 'customer-login'): ?>
+                <?php elseif ($page === 'customer-login') : ?>
                     <h2>Customer Login</h2>
                     <form action="index.php" method="POST">
                         <input type="hidden" name="action" value="customer_login">
@@ -6331,7 +4341,7 @@ if ($settings_result) {
                         <button type="submit" class="btn btn-primary">Login</button>
                     </form>
                     <p style="margin-top: 20px;">Don't have an account? <a href="index.php?page=customer-register">Register here</a></p>
-                <?php else: ?>
+                <?php else : ?>
                     <h2>Customer Registration</h2>
                     <form action="index.php" method="POST">
                         <input type="hidden" name="action" value="customer_register">
@@ -6365,7 +4375,7 @@ if ($settings_result) {
                 <?php endif; ?>
             </div>
         </div>
-    <?php elseif (in_array($page, ['home', 'books-public', 'about', 'contact', 'customer-dashboard', 'online-shop-cart', 'my-orders', 'public-sale'])): ?>
+    <?php elseif (in_array($page, ['home', 'books-public', 'about', 'contact', 'customer-dashboard', 'online-shop-cart', 'my-orders'])) : ?>
         <div id="public-site-container">
             <header class="public-header">
                 <a href="index.php?page=home" class="logo"><?php echo html($public_settings['system_name'] ?? 'General Store & Bookshop'); ?></a>
@@ -6373,7 +4383,7 @@ if ($settings_result) {
                     <ul>
                         <li><a href="index.php?page=home" class="nav-link <?php echo $page === 'home' ? 'active' : ''; ?>">Home</a></li>
                         <li><a href="index.php?page=books-public" class="nav-link <?php echo $page === 'books-public' ? 'active' : ''; ?>">Products</a></li>
-                        <?php if (isCustomer()): ?>
+                        <?php if (isCustomer()) : ?>
                             <li><a href="index.php?page=online-shop-cart" class="nav-link <?php echo $page === 'online-shop-cart' ? 'active' : ''; ?>"><i class="fas fa-shopping-basket"></i> My Cart</a></li>
                             <li><a href="index.php?page=my-orders" class="nav-link <?php echo $page === 'my-orders' ? 'active' : ''; ?>"><i class="fas fa-receipt"></i> My Orders</a></li>
                         <?php endif; ?>
@@ -6382,10 +4392,10 @@ if ($settings_result) {
                     </ul>
                 </nav>
                 <div style="display: flex; gap: 15px; align-items: center;">
-                    <?php if (isCustomer()): ?>
+                    <?php if (isCustomer()) : ?>
                         <a href="index.php?page=customer-dashboard" class="login-btn">My Dashboard</a>
                         <a href="index.php?action=logout" style="color: white; font-weight: 500;">Logout</a>
-                    <?php else: ?>
+                    <?php else : ?>
                         <a href="index.php?page=customer-login" style="color: white; font-weight: 500;">Customer Login</a>
                         <a href="index.php?page=login" class="login-btn">Admin/Staff Login</a>
                     <?php endif; ?>
@@ -6402,7 +4412,7 @@ if ($settings_result) {
                 }
                 switch ($page) {
                     case 'home':
-                        $latest_books_query = 'SELECT id, name, author, price, cover_image, stock, product_type FROM books WHERE stock > 0 ORDER BY created_at DESC LIMIT 4';
+                        $latest_books_query = "SELECT id, name, author, price, cover_image, stock, product_type FROM books WHERE stock > 0 ORDER BY created_at DESC LIMIT 4";
                         $latest_books_result = $conn->query($latest_books_query);
                         $latest_books = [];
                         if ($latest_books_result) {
@@ -6410,7 +4420,7 @@ if ($settings_result) {
                                 $latest_books[] = $row;
                             }
                         }
-                        ?>
+                ?>
                         <section id="public-home" class="page-content active">
                             <div class="hero-section">
                                 <h1>Welcome to <?php echo html($public_settings['system_name'] ?? 'General Store & Bookshop'); ?></h1>
@@ -6420,8 +4430,8 @@ if ($settings_result) {
                             <div class="card">
                                 <div class="card-header">New Arrivals</div>
                                 <div class="book-grid" id="latest-books-list">
-                                    <?php if (!empty($latest_books)): ?>
-                                        <?php foreach ($latest_books as $product): ?>
+                                    <?php if (!empty($latest_books)) : ?>
+                                        <?php foreach ($latest_books as $product) : ?>
                                             <div class="book-card">
                                                 <img src="<?php echo $product['cover_image'] ?: 'https://via.placeholder.com/150x200?text=No+Cover'; ?>" alt="<?php echo html($product['name']); ?>">
                                                 <h3><?php echo html($product['name']); ?></h3>
@@ -6441,16 +4451,16 @@ if ($settings_result) {
                                                 </div>
                                             </div>
                                         <?php endforeach; ?>
-                                    <?php else: ?>
+                                    <?php else : ?>
                                         <p>No new arrivals at the moment.</p>
                                     <?php endif; ?>
                                 </div>
                             </div>
                         </section>
                     <?php
-                    break;
-                case 'books-public':
-                    $all_categories_public = $conn->query("SELECT DISTINCT category FROM books WHERE category IS NOT NULL AND category != '' ORDER BY category ASC")->fetch_all(MYSQLI_ASSOC);
+                        break;
+                    case 'books-public':
+                        $all_categories_public = $conn->query("SELECT DISTINCT category FROM books WHERE category IS NOT NULL AND category != '' ORDER BY category ASC")->fetch_all(MYSQLI_ASSOC);
                     ?>
                         <section id="public-books" class="page-content active">
                             <div class="page-header">
@@ -6473,7 +4483,7 @@ if ($settings_result) {
                                     <label for="public-book-category-filter">Category</label>
                                     <select id="public-book-category-filter">
                                         <option value="all">All Categories</option>
-                                        <?php foreach ($all_categories_public as $cat): ?>
+                                        <?php foreach ($all_categories_public as $cat) : ?>
                                             <option value="<?php echo html($cat['category']); ?>"><?php echo html($cat['category']); ?></option>
                                         <?php endforeach; ?>
                                     </select>
@@ -6498,8 +4508,8 @@ if ($settings_result) {
                             </div>
                         </section>
                     <?php
-                    break;
-                case 'about':
+                        break;
+                    case 'about':
                     ?>
                         <section id="public-about" class="page-content active">
                             <div class="about-header">
@@ -6559,8 +4569,8 @@ if ($settings_result) {
                             </div>
                         </section>
                     <?php
-                    break;
-                case 'customer-dashboard':
+                        break;
+                    case 'customer-dashboard':
                     ?>
                         <section id="customer-dashboard" class="page-content active">
                             <div class="page-header" style="justify-content: space-between; width:100%;">
@@ -6617,15 +4627,15 @@ if ($settings_result) {
                             </div>
                         </section>
                     <?php
-                    break;
-                case 'online-shop-cart':
-                    $customers_for_checkout = [];
-                    $customers_result = $conn->query('SELECT id, name FROM customers WHERE is_active = 1 ORDER BY name ASC');
-                    if ($customers_result) {
-                        while ($row = $customers_result->fetch_assoc()) {
-                            $customers_for_checkout[] = $row;
+                        break;
+                    case 'online-shop-cart':
+                        $customers_for_checkout = [];
+                        $customers_result = $conn->query("SELECT id, name FROM customers WHERE is_active = 1 ORDER BY name ASC");
+                        if ($customers_result) {
+                            while ($row = $customers_result->fetch_assoc()) {
+                                $customers_for_checkout[] = $row;
+                            }
                         }
-                    }
                     ?>
                         <section id="online-shop-cart" class="page-content active">
                             <div class="page-header">
@@ -6709,8 +4719,8 @@ if ($settings_result) {
                             </div>
                         </div>
                     <?php
-                    break;
-                case 'my-orders':
+                        break;
+                    case 'my-orders':
                     ?>
                         <section id="my-orders" class="page-content active">
                             <div class="page-header">
@@ -6740,124 +4750,8 @@ if ($settings_result) {
                             </div>
                         </section>
                     <?php
-                    break;
-                case 'public-sale':
-                    $public_sale_token = trim($_GET['token'] ?? '');
-                    $public_sale_link = current_public_sale_link($conn, $public_sale_token);
-                    $public_sale_access = $public_sale_link ? has_public_sale_access($public_sale_token) : false;
-                    $public_sale_last_receipt = ($public_sale_access && isset($_SESSION['public_sale_last_receipt'][$public_sale_token])) ? (int) $_SESSION['public_sale_last_receipt'][$public_sale_token] : 0;
-                    if ($public_sale_last_receipt) {
-                        unset($_SESSION['public_sale_last_receipt'][$public_sale_token]);
-                    }
-                    ?>
-                        <section id="public-sale-page" class="page-content active public-sale-page" data-token="<?php echo html($public_sale_token); ?>" data-access="<?php echo $public_sale_access ? '1' : '0'; ?>" data-price-mode="<?php echo html($public_sale_link['price_mode'] ?? 'retail'); ?>" data-last-sale-id="<?php echo html($public_sale_last_receipt); ?>">
-                            <?php if (!$public_sale_link): ?>
-                                <div class="card" style="max-width: 640px; margin: 0 auto; text-align: center; padding: 36px;">
-                                    <div class="card-header">Secure Sale Link</div>
-                                    <p>This secure sale link is invalid or inactive.</p>
-                                </div>
-                            <?php elseif (!$public_sale_access): ?>
-                                <div class="card public-sale-login-card" style="max-width: 520px; margin: 0 auto; padding: 32px;">
-                                    <div class="card-header"><?php echo html($public_sale_link['link_name']); ?></div>
-                                    <p style="margin-bottom: 18px; color: var(--light-text-color);">This secure sale page runs in <strong><?php echo html(strtoupper($public_sale_link['price_mode'])); ?></strong> mode. Enter the password to unlock live barcode selling.</p>
-                                    <form method="POST" action="index.php?page=public-sale&token=<?php echo urlencode($public_sale_token); ?>">
-                                        <input type="hidden" name="action" value="public_sale_login">
-                                        <input type="hidden" name="token" value="<?php echo html($public_sale_token); ?>">
-                                        <div class="form-group">
-                                            <label for="public-sale-password">Password</label>
-                                            <input type="password" id="public-sale-password" name="access_password" required>
-                                        </div>
-                                        <button type="submit" class="btn btn-primary" style="width: 100%;">Unlock Secure Sale</button>
-                                    </form>
-                                </div>
-                            <?php else: ?>
-                                <div class="public-sale-shell">
-                                    <aside class="public-sale-products-panel card">
-                                        <div class="card-header">Products</div>
-                                        <div class="public-sale-rate-badge"><?php echo html(strtoupper($public_sale_link['price_mode'])); ?> RATE</div>
-                                        <div class="form-group">
-                                            <input type="text" id="public-sale-sidebar-search" placeholder="Search products or barcode...">
-                                        </div>
-                                        <div class="form-group">
-                                            <select id="public-sale-sidebar-category">
-                                                <option value="all">All Categories</option>
-                                            </select>
-                                        </div>
-                                        <div class="form-group">
-                                            <select id="public-sale-sidebar-type">
-                                                <option value="all">All Types</option>
-                                                <option value="book">Book</option>
-                                                <option value="general">General Item</option>
-                                            </select>
-                                        </div>
-                                        <div id="public-sale-sidebar-products" class="public-sale-product-list"></div>
-                                    </aside>
-                                    <div class="public-sale-main">
-                                        <div class="card public-sale-top-card">
-                                            <div class="public-sale-header-row">
-                                                <div>
-                                                    <h1 style="margin-bottom: 4px;"><?php echo html($public_sale_link['link_name']); ?></h1>
-                                                    <p style="color: var(--light-text-color); margin: 0;">Camera stays active for barcode selling. Session auto-locks after 8 hours.</p>
-                                                </div>
-                                                <div class="public-sale-rate-badge"><?php echo html(strtoupper($public_sale_link['price_mode'])); ?> RATE</div>
-                                            </div>
-                                            <div class="public-sale-scanner-grid">
-                                                <div>
-                                                    <label style="display:block; margin-bottom:8px; font-weight:600;">Live Barcode Scanner</label>
-                                                    <div id="public-sale-scanner" class="public-sale-scanner-box"></div>
-                                                </div>
-                                                <div>
-                                                    <div class="form-group">
-                                                        <label for="public-sale-manual-barcode">Manual Barcode Entry</label>
-                                                        <div class="inline-input-group">
-                                                            <input type="text" id="public-sale-manual-barcode" placeholder="Scan or type barcode">
-                                                            <button type="button" class="btn btn-primary" id="public-sale-barcode-submit">Add</button>
-                                                        </div>
-                                                    </div>
-                                                    <div id="public-sale-scanner-status" class="public-sale-status-chip">Scanner ready</div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div class="card">
-                                            <div class="card-header">Current Secure Cart</div>
-                                            <div class="table-responsive">
-                                                <table class="data-table">
-                                                    <thead>
-                                                        <tr>
-                                                            <th>Product</th>
-                                                            <th>Barcode</th>
-                                                            <th>Rate</th>
-                                                            <th>Qty</th>
-                                                            <th>Subtotal</th>
-                                                            <th>Actions</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody id="public-sale-cart-items">
-                                                        <tr><td colspan="6">No products scanned yet.</td></tr>
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                            <div id="public-sale-cart-summary" class="public-sale-summary-row">
-                                                <span>Total</span>
-                                                <strong id="public-sale-grand-total"><?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?> 0.00</strong>
-                                            </div>
-                                            <form id="public-sale-submit-form" method="POST" action="index.php?page=public-sale&token=<?php echo urlencode($public_sale_token); ?>">
-                                                <input type="hidden" name="action" value="submit_public_sale">
-                                                <input type="hidden" name="token" value="<?php echo html($public_sale_token); ?>">
-                                                <input type="hidden" name="cart_items" id="public-sale-cart-input">
-                                                <div class="form-actions" style="justify-content: flex-end;">
-                                                    <button type="button" class="btn btn-secondary" id="public-sale-clear-cart">Clear</button>
-                                                    <button type="submit" class="btn btn-success" id="public-sale-submit-btn">Complete Sale</button>
-                                                </div>
-                                            </form>
-                                        </div>
-                                    </div>
-                                </div>
-                            <?php endif; ?>
-                        </section>
-                    <?php
-                    break;
-                case 'contact':
+                        break;
+                    case 'contact':
                     ?>
                         <section id="public-contact" class="page-content active">
                             <div class="contact-header">
@@ -6898,10 +4792,10 @@ if ($settings_result) {
                                     <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.3);">
                                         <h4 style="margin-bottom: 15px; opacity: 0.9;">Follow Us</h4>
                                         <div style="display: flex; gap: 15px;">
-                                            <?php if (!empty($public_settings['facebook_url'])): ?>
+                                            <?php if (!empty($public_settings['facebook_url'])) : ?>
                                                 <a href="<?php echo html($public_settings['facebook_url']); ?>" target="_blank" style="background: white; color: var(--primary-color); width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: transform 0.3s;"><i class="fab fa-facebook-f"></i></a>
                                             <?php endif; ?>
-                                            <?php if (!empty($public_settings['instagram_url'])): ?>
+                                            <?php if (!empty($public_settings['instagram_url'])) : ?>
                                                 <a href="<?php echo html($public_settings['instagram_url']); ?>" target="_blank" style="background: white; color: var(--primary-color); width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: transform 0.3s;"><i class="fab fa-instagram"></i></a>
                                             <?php endif; ?>
                                         </div>
@@ -6909,7 +4803,7 @@ if ($settings_result) {
                                 </div>
                                 <div class="contact-form-box">
                                     <h3 style="color: var(--primary-color); margin-bottom: 20px;">Send us a Message</h3>
-                                    <form id="contact-message-form">
+                                    <form onsubmit="event.preventDefault(); alert('Thank you for your message! We will get back to you soon.');">
                                         <div class="form-group">
                                             <label>Your Name</label>
                                             <input type="text" class="form-control" style="width:100%; padding:12px; border:1px solid var(--border-color); border-radius:5px;" required placeholder="John Doe">
@@ -6930,7 +4824,7 @@ if ($settings_result) {
                                     </form>
                                 </div>
                             </div>
-                            <?php if (!empty($public_settings['google_map_embed_url'])): ?>
+                            <?php if (!empty($public_settings['google_map_embed_url'])) : ?>
                                 <div class="map-container">
                                     <iframe src="<?php echo html($public_settings['google_map_embed_url']); ?>" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>
                                 </div>
@@ -6948,37 +4842,35 @@ if ($settings_result) {
                 <p>&copy; <?php echo date('Y'); ?> <?php echo html($public_settings['system_name'] ?? 'General Store & Bookshop'); ?>. All rights reserved. Designed by Yasin Ullah, Pakistan.</p>
             </footer>
         </div>
-    <?php else: ?>
+    <?php else : ?>
         <div id="app-container">
             <aside class="sidebar">
-                <div class="sidebar-header-row">
-                    <button class="hamburger-menu" id="hamburger-menu"><i class="fas fa-bars"></i></button>
-                    <div class="mobile-breadcrumb">
+                <button class="hamburger-menu" id="hamburger-menu"><i class="fas fa-bars"></i></button>
+                <div class="mobile-breadcrumb">
                     <a href="index.php?page=dashboard"><i class="fas fa-home"></i></a>
                     <span class="separator">/</span>
                     <span><?php echo html(ucwords(str_replace('-', ' ', $page))); ?></span>
                 </div>
-                    <h2><?php echo html($public_settings['system_name'] ?? 'General Store & Bookshop'); ?></h2>
-                </div>
+                <h2><?php echo html($public_settings['system_name'] ?? 'General Store & Bookshop'); ?></h2>
                 <nav>
                     <ul>
-                        <li><a href="index.php?page=dashboard" class="nav-link <?php echo $page === 'dashboard' ? 'active' : ''; ?>"><i class="fas fa-home"></i> <span class="sidebar-label">Dashboard</span></a></li>
-                        <li><a href="index.php?page=books" class="nav-link <?php echo $page === 'books' ? 'active' : ''; ?>"><i class="fas fa-box-open"></i> <span class="sidebar-label">Products</span></a></li>
-                        <?php if (hasAccess('customers')): ?><li><a href="index.php?page=customers" class="nav-link <?php echo $page === 'customers' ? 'active' : ''; ?>"><i class="fas fa-users"></i> <span class="sidebar-label">Customers</span></a></li><?php endif; ?>
-                        <?php if (hasAccess('users')): ?><li><a href="index.php?page=users" class="nav-link <?php echo $page === 'users' ? 'active' : ''; ?>"><i class="fas fa-user-shield"></i> <span class="sidebar-label">Users & Roles</span></a></li><?php endif; ?>
-                        <?php if (hasAccess('suppliers')): ?><li><a href="index.php?page=suppliers" class="nav-link <?php echo $page === 'suppliers' ? 'active' : ''; ?>"><i class="fas fa-truck-moving"></i> <span class="sidebar-label">Suppliers</span></a></li><?php endif; ?>
-                        <?php if (hasAccess('purchase-orders')): ?><li><a href="index.php?page=purchase-orders" class="nav-link <?php echo $page === 'purchase-orders' ? 'active' : ''; ?>"><i class="fas fa-boxes"></i> <span class="sidebar-label">Purchase Orders</span></a></li><?php endif; ?>
-                        <?php if (hasAccess('cart')): ?><li><a href="index.php?page=cart" class="nav-link <?php echo $page === 'cart' ? 'active' : ''; ?>"><i class="fas fa-shopping-cart"></i> <span class="sidebar-label">POS (Cart)</span></a></li><?php endif; ?>
-                        <?php if (hasAccess('sales-history')): ?><li><a href="index.php?page=sales-history" class="nav-link <?php echo $page === 'sales-history' ? 'active' : ''; ?>"><i class="fas fa-receipt"></i> <span class="sidebar-label">Sales History</span></a></li><?php endif; ?>
-                        <?php if (hasAccess('online-orders')): ?><li><a href="index.php?page=online-orders" class="nav-link <?php echo $page === 'online-orders' ? 'active' : ''; ?>"><i class="fas fa-globe"></i> <span class="sidebar-label">Online Orders</span></a></li><?php endif; ?>
-                        <?php if (hasAccess('promotions')): ?><li><a href="index.php?page=promotions" class="nav-link <?php echo $page === 'promotions' ? 'active' : ''; ?>"><i class="fas fa-tag"></i> <span class="sidebar-label">Promotions</span></a></li><?php endif; ?>
-                        <?php if (hasAccess('expenses')): ?><li><a href="index.php?page=expenses" class="nav-link <?php echo $page === 'expenses' ? 'active' : ''; ?>"><i class="fas fa-money-bill-wave"></i> <span class="sidebar-label">Expenses</span></a></li><?php endif; ?>
-                        <?php if (hasAccess('reports')): ?><li><a href="index.php?page=reports" class="nav-link <?php echo $page === 'reports' ? 'active' : ''; ?>"><i class="fas fa-chart-line"></i> <span class="sidebar-label">Reports</span></a></li><?php endif; ?>
-                        <?php if (hasAccess('live-sales')): ?><li><a href="index.php?page=live-sales" class="nav-link <?php echo $page === 'live-sales' ? 'active' : ''; ?>"><i class="fas fa-satellite-dish"></i> <span class="sidebar-label">Live Sales</span></a></li><?php endif; ?>
-                        <?php if (hasAccess('settings')): ?><li><a href="index.php?page=settings" class="nav-link <?php echo $page === 'settings' ? 'active' : ''; ?>"><i class="fas fa-cog"></i> <span class="sidebar-label">Settings</span></a></li><?php endif; ?>
-                        <?php if (hasAccess('public-sale-links')): ?><li><a href="index.php?page=public-sale-links" class="nav-link <?php echo $page === 'public-sale-links' ? 'active' : ''; ?>"><i class="fas fa-link"></i> <span class="sidebar-label">Secure Sale Links</span></a></li><?php endif; ?>
-                        <?php if (hasAccess('print-barcodes')): ?><li><a href="index.php?page=print-barcodes" class="nav-link <?php echo $page === 'print-barcodes' ? 'active' : ''; ?>"><i class="fas fa-print"></i> <span class="sidebar-label">Print Barcodes</span></a></li><?php endif; ?>
-                        <?php if (hasAccess('backup-restore')): ?><li><a href="index.php?page=backup-restore" class="nav-link <?php echo $page === 'backup-restore' ? 'active' : ''; ?>"><i class="fas fa-database"></i> <span class="sidebar-label">Backup/Restore</span></a></li><?php endif; ?>
+                        <li><a href="index.php?page=dashboard" class="nav-link <?php echo $page === 'dashboard' ? 'active' : ''; ?>"><i class="fas fa-home"></i> Dashboard</a></li>
+                        <li><a href="index.php?page=books" class="nav-link <?php echo $page === 'books' ? 'active' : ''; ?>"><i class="fas fa-box-open"></i> Products</a></li>
+                        <li><a href="index.php?page=customers" class="nav-link <?php echo $page === 'customers' ? 'active' : ''; ?>"><i class="fas fa-users"></i> Customers</a></li>
+                        <?php if (isAdmin()) : ?>
+                            <li><a href="index.php?page=suppliers" class="nav-link <?php echo $page === 'suppliers' ? 'active' : ''; ?>"><i class="fas fa-truck-moving"></i> Suppliers</a></li>
+                            <li><a href="index.php?page=purchase-orders" class="nav-link <?php echo $page === 'purchase-orders' ? 'active' : ''; ?>"><i class="fas fa-boxes"></i> Purchase Orders</a></li>
+                        <?php endif; ?>
+                        <li><a href="index.php?page=cart" class="nav-link <?php echo $page === 'cart' ? 'active' : ''; ?>"><i class="fas fa-shopping-cart"></i> POS (Cart)</a></li>
+                        <li><a href="index.php?page=sales-history" class="nav-link <?php echo $page === 'sales-history' ? 'active' : ''; ?>"><i class="fas fa-receipt"></i> Sales History</a></li>
+                        <li><a href="index.php?page=online-orders" class="nav-link <?php echo $page === 'online-orders' ? 'active' : ''; ?>"><i class="fas fa-globe"></i> Online Orders</a></li>
+                        <?php if (isAdmin()) : ?>
+                            <li><a href="index.php?page=promotions" class="nav-link <?php echo $page === 'promotions' ? 'active' : ''; ?>"><i class="fas fa-tag"></i> Promotions</a></li>
+                            <li><a href="index.php?page=expenses" class="nav-link <?php echo $page === 'expenses' ? 'active' : ''; ?>"><i class="fas fa-money-bill-wave"></i> Expenses</a></li>
+                            <li><a href="index.php?page=reports" class="nav-link <?php echo $page === 'reports' ? 'active' : ''; ?>"><i class="fas fa-chart-line"></i> Reports</a></li>
+                            <li><a href="index.php?page=settings" class="nav-link <?php echo $page === 'settings' ? 'active' : ''; ?>"><i class="fas fa-cog"></i> Settings</a></li>
+                            <li><a href="index.php?page=backup-restore" class="nav-link <?php echo $page === 'backup-restore' ? 'active' : ''; ?>"><i class="fas fa-database"></i> Backup/Restore</a></li>
+                        <?php endif; ?>
                     </ul>
                 </nav>
                 <div class="user-info">
@@ -6995,9 +4887,8 @@ if ($settings_result) {
             </aside>
             <main class="content">
                 <div class="global-search-bar">
-                    <button id="mobile-nav-toggle" class="hamburger-menu" title="Menu" style="display:none;"><i class="fas fa-bars"></i></button>
                     <input type="text" id="global-search-input" placeholder="Global Search (Products, Customers, Sales ID)...">
-                    <div id="global-search-results" class="global-search-results"></div>
+                    <div class="global-search-results"></div>
                 </div>
                 <?php
                 if (isset($_SESSION['toast'])) {
@@ -7006,13 +4897,13 @@ if ($settings_result) {
                 }
                 switch ($page) {
                     case 'dashboard':
-                        $total_books_count = $conn->query('SELECT COUNT(*) FROM books')->fetch_row()[0];
-                        $total_customers_count = $conn->query('SELECT COUNT(*) FROM customers WHERE is_active = 1')->fetch_row()[0];
-                        $low_stock_count = $conn->query('SELECT COUNT(*) FROM books WHERE stock < 5')->fetch_row()[0];
+                        $total_books_count = $conn->query("SELECT COUNT(*) FROM books")->fetch_row()[0];
+                        $total_customers_count = $conn->query("SELECT COUNT(*) FROM customers WHERE is_active = 1")->fetch_row()[0];
+                        $low_stock_count = $conn->query("SELECT COUNT(*) FROM books WHERE stock < 5")->fetch_row()[0];
                         $today_start = date('Y-m-d 00:00:00');
                         $today_end = date('Y-m-d 23:59:59');
-                        $stmt_today_sales = $conn->prepare('SELECT SUM(total) FROM sales WHERE sale_date BETWEEN ? AND ?');
-                        $stmt_today_sales->bind_param('ss', $today_start, $today_end);
+                        $stmt_today_sales = $conn->prepare("SELECT SUM(total) FROM sales WHERE sale_date BETWEEN ? AND ?");
+                        $stmt_today_sales->bind_param("ss", $today_start, $today_end);
                         $stmt_today_sales->execute();
                         $today_sales_total = $stmt_today_sales->get_result()->fetch_row()[0] ?? 0;
                         $stmt_today_sales->close();
@@ -7031,7 +4922,7 @@ if ($settings_result) {
                                 $recent_sales[] = $row;
                             }
                         }
-                        $low_stock_books_query = 'SELECT id, name, author, stock, product_type FROM books WHERE stock < 5 ORDER BY stock ASC';
+                        $low_stock_books_query = "SELECT id, name, author, stock, product_type FROM books WHERE stock < 5 ORDER BY stock ASC";
                         $low_stock_books_result = $conn->query($low_stock_books_query);
                         $low_stock_books = [];
                         if ($low_stock_books_result) {
@@ -7039,180 +4930,103 @@ if ($settings_result) {
                                 $low_stock_books[] = $row;
                             }
                         }
-                        ?>
+                ?>
                         <section id="dashboard" class="page-content active">
                             <div class="page-header">
-                                <h1>Dashboard Overview</h1>
+                                <h1>Dashboard</h1>
                             </div>
-                            <div class="dashboard-grid">
-                                <div class="dashboard-card" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white;">
-                                    <h3 style="color: rgba(255,255,255,0.8);">Today's Revenue</h3>
-                                    <p id="dash-today-rev" style="color: white;"><?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?> 0.00</p>
-                                </div>
-                                <div class="dashboard-card" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white;">
-                                    <h3 style="color: rgba(255,255,255,0.8);">Today's Orders</h3>
-                                    <p id="dash-today-orders" style="color: white;">0</p>
-                                </div>
-                                <div class="dashboard-card">
-                                    <h3>This Month's Revenue</h3>
-                                    <p id="dash-month-rev"><?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?> 0.00</p>
-                                </div>
-                                <div class="dashboard-card">
-                                    <h3>Pending Online Orders</h3>
-                                    <p id="dash-pending-orders" class="danger">0</p>
-                                </div>
-                            </div>
-                            
                             <div class="dashboard-grid">
                                 <div class="dashboard-card">
                                     <h3>Total Products</h3>
-                                    <p id="dash-total-products">0</p>
+                                    <p id="total-books-count"><?php echo html($total_books_count); ?></p>
                                 </div>
                                 <div class="dashboard-card">
                                     <h3>Total Customers</h3>
-                                    <p id="dash-total-customers">0</p>
+                                    <p id="total-customers-count"><?php echo html($total_customers_count); ?></p>
                                 </div>
                                 <div class="dashboard-card">
-                                    <h3>Total Suppliers</h3>
-                                    <p id="dash-total-suppliers">0</p>
+                                    <h3>Products Low in Stock</h3>
+                                    <p id="low-stock-count" class="<?php echo $low_stock_count > 0 ? 'danger' : ''; ?>"><?php echo html($low_stock_count); ?></p>
                                 </div>
                                 <div class="dashboard-card">
-                                    <h3>Low Stock Items</h3>
-                                    <p id="dash-low-stock" class="danger">0</p>
-                                </div>
-                            </div>
-
-                            <div class="dashboard-grid">
-                                <div class="dashboard-card">
-                                    <h3>Total Stock Value</h3>
-                                    <p id="dash-stock-value"><?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?> 0.00</p>
-                                </div>
-                                <div class="dashboard-card">
-                                    <h3>Lifetime Revenue</h3>
-                                    <p id="dash-lifetime-rev"><?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?> 0.00</p>
-                                </div>
-                                <div class="dashboard-card">
-                                    <h3>Lifetime Expenses</h3>
-                                    <p id="dash-total-expenses" class="danger"><?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?> 0.00</p>
-                                </div>
-                                <div class="dashboard-card">
-                                    <h3>Active Promotions</h3>
-                                    <p id="dash-active-promos">0</p>
-                                </div>
-                            </div>
-
-                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; margin-bottom: 20px;">
-                                <div class="card">
-                                    <div class="card-header">Last 7 Days Revenue</div>
-                                    <div style="height:300px;"><canvas id="dash-weekly-chart"></canvas></div>
-                                </div>
-                                <div class="card">
-                                    <div class="card-header">Top Selling Items (This Month)</div>
-                                    <div style="height:300px;"><canvas id="dash-top-chart"></canvas></div>
-                                </div>
-                            </div>
-                            
-                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; margin-bottom: 20px;">
-                                <div class="card">
-                                    <div class="card-header">Sales vs Expenses (Last 6 Months)</div>
-                                    <div style="height:300px;"><canvas id="dash-monthly-chart"></canvas></div>
-                                </div>
-                                <div class="card">
-                                    <div class="card-header">Online Orders Status</div>
-                                    <div style="height:300px;"><canvas id="dash-orders-chart"></canvas></div>
-                                </div>
-                            </div>
-
-                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;">
-                                <div class="card">
-                                    <div class="card-header">Recent Sales</div>
-                                    <div class="table-responsive">
-                                        <table class="data-table">
-                                            <thead>
-                                                <tr>
-                                                    <th>Date</th>
-                                                    <th>Customer</th>
-                                                    <th>Total</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody id="dashboard-recent-sales">
-                                                <tr><td colspan="3">Loading...</td></tr>
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                                <div class="card">
-                                    <div class="card-header">Low Stock Alerts</div>
-                                    <div class="table-responsive">
-                                        <table class="data-table">
-                                            <thead>
-                                                <tr>
-                                                    <th>Product</th>
-                                                    <th>Stock</th>
-                                                    <th>Action</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody id="dashboard-low-stock-books">
-                                                <tr><td colspan="3">Loading...</td></tr>
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                            </div>
-                        </section>
-                    <?php
-                    break;
-                case 'live-sales':
-                    ?>
-                        <section id="live-sales" class="page-content <?php echo $page === 'live-sales' ? 'active' : ''; ?>">
-                            <div class="page-header">
-                                <h1>Live Sales Monitor <span style="font-size:14px; color:var(--success-color); margin-left: 10px;"><i class="fas fa-circle" style="animation: pulse-live 1.5s infinite;"></i> Live</span></h1>
-                            </div>
-                            <div class="dashboard-grid">
-                                <div class="dashboard-card" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white;">
-                                    <h3 style="color: rgba(255,255,255,0.8);">Today's Earnings</h3>
-                                    <p id="live-today-rev" style="color: white;"><?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?> 0.00</p>
-                                </div>
-                                <div class="dashboard-card" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white;">
-                                    <h3 style="color: rgba(255,255,255,0.8);">Today's Orders</h3>
-                                    <p id="live-today-orders" style="color: white;">0</p>
-                                </div>
-                                <div class="dashboard-card" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white;">
-                                    <h3 style="color: rgba(255,255,255,0.8);">Total Discount Given</h3>
-                                    <p id="live-today-disc" style="color: white;"><?php echo html($public_settings['currency_symbol'] ?? 'PKR '); ?> 0.00</p>
+                                    <h3>Today's Sales</h3>
+                                    <p id="today-sales-total"><?php echo format_currency($today_sales_total); ?></p>
                                 </div>
                             </div>
                             <div class="card">
-                                <div class="card-header">Today's Transactions (Auto-updates every 5s)</div>
+                                <div class="card-header">Recent Sales</div>
                                 <div class="table-responsive">
                                     <table class="data-table">
                                         <thead>
                                             <tr>
-                                                <th>Time</th>
-                                                <th>Sale ID</th>
+                                                <th>Date</th>
                                                 <th>Customer</th>
-                                                <th>Sold By</th>
                                                 <th>Items</th>
-                                                <th>Discount</th>
                                                 <th>Total</th>
                                             </tr>
                                         </thead>
-                                        <tbody id="live-sales-list">
-                                            <tr><td colspan="7">Waiting for data...</td></tr>
+                                        <tbody id="dashboard-recent-sales">
+                                            <?php if (!empty($recent_sales)) : ?>
+                                                <?php foreach ($recent_sales as $sale) : ?>
+                                                    <tr>
+                                                        <td><?php echo format_date(html($sale['sale_date'])); ?></td>
+                                                        <td><?php echo html($sale['customer_name'] ?? 'Guest'); ?></td>
+                                                        <td><?php echo html($sale['item_names']); ?></td>
+                                                        <td><?php echo format_currency(html($sale['total'])); ?></td>
+                                                    </tr>
+                                                <?php endforeach; ?>
+                                            <?php else : ?>
+                                                <tr>
+                                                    <td colspan="4">No recent sales.</td>
+                                                </tr>
+                                            <?php endif; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <div class="card">
+                                <div class="card-header">Low Stock Products</div>
+                                <div class="table-responsive">
+                                    <table class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Name</th>
+                                                <th>Type</th>
+                                                <th>Stock</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="dashboard-low-stock-books">
+                                            <?php if (!empty($low_stock_books)) : ?>
+                                                <?php foreach ($low_stock_books as $book) : ?>
+                                                    <tr class="<?php echo $book['stock'] < 5 ? 'low-stock' : ''; ?>">
+                                                        <td><?php echo html($book['name']); ?></td>
+                                                        <td><?php echo html(ucfirst($book['product_type'])); ?></td>
+                                                        <td><?php echo html($book['stock']); ?></td>
+                                                        <td class="actions">
+                                                            <button class="btn btn-info btn-sm" onclick="openRestockModal('<?php echo html($book['id']); ?>')"><i class="fas fa-box"></i> Restock</button>
+                                                        </td>
+                                                    </tr>
+                                                <?php endforeach; ?>
+                                            <?php else : ?>
+                                                <tr>
+                                                    <td colspan="4">No products currently low in stock.</td>
+                                                </tr>
+                                            <?php endif; ?>
                                         </tbody>
                                     </table>
                                 </div>
                             </div>
                         </section>
                     <?php
-                    break;
-                case 'books':
+                        break;
+                    case 'books':
                     ?>
                         <section id="books" class="page-content <?php echo $page === 'books' ? 'active' : ''; ?>">
                             <div class="page-header">
                                 <h1>Products Management</h1>
                                 <div style="display: flex; gap: 10px;">
-                                    <?php if (isAdmin()): ?>
+                                    <?php if (isAdmin()) : ?>
                                         <button class="btn btn-primary" id="add-book-btn"><i class="fas fa-plus"></i> Add New
                                             Product</button>
                                         <button class="btn btn-secondary" id="export-books-btn"><i class="fas fa-download"></i> Export
@@ -7267,55 +5081,18 @@ if ($settings_result) {
                             </div>
                         </section>
                     <?php
-                    break;
-                case 'users':
-                    if (!hasAccess('users')) {
-                        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized'];
-                        redirect('dashboard');
-                    }
-                    ?>
-                    <section id="users-page" class="page-content active">
-                        <div class="page-header">
-                            <h1>Users & Roles Management</h1>
-                            <div style="display: flex; gap: 10px;">
-                                <button class="btn btn-primary" onclick="openUserModal()"><i class="fas fa-user-plus"></i> Add User</button>
-                                <button class="btn btn-secondary" onclick="openRoleModal()"><i class="fas fa-shield-alt"></i> Add Role</button>
-                            </div>
-                        </div>
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;">
-                            <div class="card">
-                                <div class="card-header">System Users</div>
-                                <div class="table-responsive">
-                                    <table class="data-table">
-                                        <thead><tr><th>Username</th><th>Role</th><th>Actions</th></tr></thead>
-                                        <tbody id="users-list"><tr><td colspan="3">Loading...</td></tr></tbody>
-                                    </table>
-                                </div>
-                            </div>
-                            <div class="card">
-                                <div class="card-header">Roles & Permissions</div>
-                                <div class="table-responsive">
-                                    <table class="data-table">
-                                        <thead><tr><th>Role Name</th><th>Actions</th></tr></thead>
-                                        <tbody id="roles-list"><tr><td colspan="2">Loading...</td></tr></tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-                    <?php
-                    break;
-                case 'customers':
-                    $customers_permission_level = 'limited';
-                    if (isAdmin()) {
-                        $customers_permission_level = 'full_access';
-                    }
+                        break;
+                    case 'customers':
+                        $customers_permission_level = 'view_only';
+                        if (isAdmin()) {
+                            $customers_permission_level = 'full_access';
+                        }
                     ?>
                         <section id="customers" class="page-content <?php echo $page === 'customers' ? 'active' : ''; ?>">
                             <div class="page-header">
                                 <h1>Customers Management</h1>
                                 <div style="display: flex; gap: 10px;">
-                                    <?php if ($customers_permission_level === 'full_access'): ?>
+                                    <?php if ($customers_permission_level === 'full_access') : ?>
                                         <button class="btn btn-primary" id="add-customer-btn"><i class="fas fa-plus"></i> Add New
                                             Customer</button>
                                         <button class="btn btn-secondary" id="export-customers-btn"><i class="fas fa-download"></i>
@@ -7365,12 +5142,12 @@ if ($settings_result) {
                             </div>
                         </section>
                     <?php
-                    break;
-                case 'suppliers':
-                    if (!isAdmin()) {
-                        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                        redirect('dashboard');
-                    }
+                        break;
+                    case 'suppliers':
+                        if (!isAdmin()) {
+                            $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
+                            redirect('dashboard');
+                        }
                     ?>
                         <section id="suppliers" class="page-content <?php echo $page === 'suppliers' ? 'active' : ''; ?>">
                             <div class="page-header">
@@ -7414,15 +5191,15 @@ if ($settings_result) {
                             </div>
                         </section>
                     <?php
-                    break;
-                case 'purchase-orders':
-                    if (!isAdmin()) {
-                        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                        redirect('dashboard');
-                    }
+                        break;
+                    case 'purchase-orders':
+                        if (!isAdmin()) {
+                            $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
+                            redirect('dashboard');
+                        }
                     ?>
                         <?php
-                        $all_books_for_po = $conn->query('SELECT id, name, author, price FROM books ORDER BY name ASC')->fetch_all(MYSQLI_ASSOC);
+                        $all_books_for_po = $conn->query("SELECT id, name, author, price FROM books ORDER BY name ASC")->fetch_all(MYSQLI_ASSOC);
                         ?>
                         <section id="purchase-orders" class="page-content <?php echo $page === 'purchase-orders' ? 'active' : ''; ?>">
                             <div class="page-header">
@@ -7477,15 +5254,15 @@ if ($settings_result) {
                             </div>
                         </section>
                     <?php
-                    break;
-                case 'cart':
-                    $customers_for_checkout = [];
-                    $customers_result = $conn->query('SELECT id, name FROM customers WHERE is_active = 1 ORDER BY name ASC');
-                    if ($customers_result) {
-                        while ($row = $customers_result->fetch_assoc()) {
-                            $customers_for_checkout[] = $row;
+                        break;
+                    case 'cart':
+                        $customers_for_checkout = [];
+                        $customers_result = $conn->query("SELECT id, name FROM customers WHERE is_active = 1 ORDER BY name ASC");
+                        if ($customers_result) {
+                            while ($row = $customers_result->fetch_assoc()) {
+                                $customers_for_checkout[] = $row;
+                            }
                         }
-                    }
                     ?>
                         <section id="cart" class="page-content <?php echo $page === 'cart' ? 'active' : ''; ?>">
                             <div class="page-header">
@@ -7499,7 +5276,7 @@ if ($settings_result) {
                                 <div class="card-header">Add Products to Cart</div>
                                 <div class="search-sort-controls" style="margin-top: 0;">
                                     <div class="form-group">
-                                        <div class="inline-input-group"><input type="text" id="book-to-cart-search" placeholder="Search product to add to cart..."><button type="button" class="btn btn-secondary barcode-scan-btn" id="scan-pos-barcode-btn"><i class="fas fa-barcode"></i> Scan</button></div>
+                                        <input type="text" id="book-to-cart-search" placeholder="Search product to add to cart...">
                                     </div>
                                 </div>
                                 <div class="table-responsive">
@@ -7579,7 +5356,7 @@ if ($settings_result) {
                                         <label for="checkout-customer">Select Customer (Optional)</label>
                                         <select id="checkout-customer">
                                             <option value="">Guest Customer</option>
-                                            <?php foreach ($customers_for_checkout as $customer): ?>
+                                            <?php foreach ($customers_for_checkout as $customer) : ?>
                                                 <option value="<?php echo html($customer['id']); ?>"><?php echo html($customer['name']); ?></option>
                                             <?php endforeach; ?>
                                         </select>
@@ -7608,15 +5385,15 @@ if ($settings_result) {
                             </div>
                         </div>
                     <?php
-                    break;
-                case 'sales-history':
+                        break;
+                    case 'sales-history':
                     ?>
                         <section id="sales-history" class="page-content <?php echo $page === 'sales-history' ? 'active' : ''; ?>">
                             <div class="page-header">
                                 <h1>Sales History</h1>
                                 <button class="btn btn-secondary" id="back-to-cart-btn"><i class="fas fa-arrow-left"></i> Back to
                                     POS</button>
-                                <?php if (isAdmin()): ?>
+                                <?php if (isAdmin()) : ?>
                                     <button class="btn btn-secondary" id="export-sales-btn"><i class="fas fa-download"></i> Export
                                         Sales</button>
                                 <?php endif; ?>
@@ -7652,12 +5429,12 @@ if ($settings_result) {
                             </div>
                         </section>
                     <?php
-                    break;
-                case 'online-orders':
-                    if (!isAdmin() && !isStaff()) {
-                        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                        redirect('dashboard');
-                    }
+                        break;
+                    case 'online-orders':
+                        if (!isAdmin() && !isStaff()) {
+                            $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
+                            redirect('dashboard');
+                        }
                     ?>
                         <section id="online-orders" class="page-content <?php echo $page === 'online-orders' ? 'active' : ''; ?>">
                             <div class="page-header">
@@ -7704,14 +5481,14 @@ if ($settings_result) {
                             </div>
                         </section>
                     <?php
-                    break;
-                case 'promotions':
-                    if (!isAdmin()) {
-                        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                        redirect('dashboard');
-                    }
-                    $all_products = $conn->query('SELECT id, name, author, product_type FROM books ORDER BY name ASC')->fetch_all(MYSQLI_ASSOC);
-                    $all_categories = $conn->query("SELECT DISTINCT category FROM books WHERE category IS NOT NULL AND category != '' ORDER BY category ASC")->fetch_all(MYSQLI_ASSOC);
+                        break;
+                    case 'promotions':
+                        if (!isAdmin()) {
+                            $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
+                            redirect('dashboard');
+                        }
+                        $all_products = $conn->query("SELECT id, name, author, product_type FROM books ORDER BY name ASC")->fetch_all(MYSQLI_ASSOC);
+                        $all_categories = $conn->query("SELECT DISTINCT category FROM books WHERE category IS NOT NULL AND category != '' ORDER BY category ASC")->fetch_all(MYSQLI_ASSOC);
                     ?>
                         <section id="promotions" class="page-content <?php echo $page === 'promotions' ? 'active' : ''; ?>">
                             <div class="page-header">
@@ -7744,12 +5521,12 @@ if ($settings_result) {
                             </div>
                         </section>
                     <?php
-                    break;
-                case 'expenses':
-                    if (!isAdmin()) {
-                        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                        redirect('dashboard');
-                    }
+                        break;
+                    case 'expenses':
+                        if (!isAdmin()) {
+                            $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
+                            redirect('dashboard');
+                        }
                     ?>
                         <section id="expenses" class="page-content <?php echo $page === 'expenses' ? 'active' : ''; ?>">
                             <div class="page-header">
@@ -7794,12 +5571,12 @@ if ($settings_result) {
                             </div>
                         </section>
                     <?php
-                    break;
-                case 'reports':
-                    if (!isAdmin()) {
-                        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                        redirect('dashboard');
-                    }
+                        break;
+                    case 'reports':
+                        if (!isAdmin()) {
+                            $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
+                            redirect('dashboard');
+                        }
                     ?>
                         <section id="reports" class="page-content <?php echo $page === 'reports' ? 'active' : ''; ?>">
                             <div class="page-header">
@@ -7863,105 +5640,20 @@ if ($settings_result) {
                             </div>
                         </section>
                     <?php
-                    break;
-                case 'public-sale-links':
-                    if (!isAdmin()) {
-                        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                        redirect('dashboard');
-                    }
-                    $public_sale_links = [];
-                    $links_query = $conn->query('SELECT psl.*, u.username AS creator_name FROM public_sale_links psl LEFT JOIN users u ON psl.created_by = u.id ORDER BY psl.created_at DESC');
-                    if ($links_query) {
-                        while ($row = $links_query->fetch_assoc()) {
-                            $public_sale_links[] = $row;
+                        break;
+                    case 'settings':
+                        if (!isAdmin()) {
+                            $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
+                            redirect('dashboard');
                         }
-                    }
-                    $base_public_link = ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST'] . rtrim(dirname($_SERVER['PHP_SELF']), '/\\') . '/index.php?page=public-sale&token=';
-                    ?>
-                        <section id="public-sale-links" class="page-content <?php echo $page === 'public-sale-links' ? 'active' : ''; ?>">
-                            <div class="page-header">
-                                <h1>Secure Sale Links</h1>
-                                <button class="btn btn-primary" id="add-public-sale-link-btn"><i class="fas fa-plus"></i> New Secure Link</button>
-                            </div>
-                            <div class="card">
-                                <div class="card-header">Password-Protected Public Selling Links</div>
-                                <div class="table-responsive">
-                                    <table class="data-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Name</th>
-                                                <th>Mode</th>
-                                                <th>Status</th>
-                                                <th>Secure Link</th>
-                                                <th>Created</th>
-                                                <th>Actions</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <?php if (!empty($public_sale_links)): ?>
-                                                <?php foreach ($public_sale_links as $secure_link): ?>
-                                                    <?php $full_secure_link = $base_public_link . $secure_link['token']; ?>
-                                                    <tr>
-                                                        <td>
-                                                            <strong><?php echo html($secure_link['link_name']); ?></strong>
-                                                            <?php if (!empty($secure_link['notes'])): ?>
-                                                                <div style="color: var(--light-text-color); font-size: 12px; margin-top: 4px;"><?php echo html($secure_link['notes']); ?></div>
-                                                            <?php endif; ?>
-                                                        </td>
-                                                        <td><span class="public-sale-rate-badge"><?php echo html(strtoupper($secure_link['price_mode'])); ?></span></td>
-                                                        <td><?php echo $secure_link['is_active'] ? '<span class="status-pill success">Active</span>' : '<span class="status-pill muted">Inactive</span>'; ?></td>
-                                                        <td>
-                                                            <div class="secure-link-copy-wrap">
-                                                                <input type="text" readonly value="<?php echo html($full_secure_link); ?>" class="secure-link-input">
-                                                                <button type="button" class="btn btn-secondary btn-sm copy-secure-link-btn" data-link="<?php echo html($full_secure_link); ?>"><i class="fas fa-copy"></i></button>
-                                                                <a href="<?php echo html($full_secure_link); ?>" target="_blank" class="btn btn-info btn-sm"><i class="fas fa-up-right-from-square"></i></a>
-                                                            </div>
-                                                        </td>
-                                                        <td><?php echo format_date($secure_link['created_at']); ?></td>
-                                                        <td class="actions">
-                                                            <button type="button" class="btn btn-primary btn-sm edit-public-sale-link-btn"
-                                                                data-id="<?php echo html($secure_link['id']); ?>"
-                                                                data-name="<?php echo html($secure_link['link_name']); ?>"
-                                                                data-mode="<?php echo html($secure_link['price_mode']); ?>"
-                                                                data-notes="<?php echo html($secure_link['notes'] ?? ''); ?>"
-                                                                data-active="<?php echo html($secure_link['is_active']); ?>"><i class="fas fa-edit"></i> Edit</button>
-                                                            <form method="POST" action="index.php?page=public-sale-links" style="display:inline;">
-                                                                <input type="hidden" name="action" value="toggle_public_sale_link">
-                                                                <input type="hidden" name="link_id" value="<?php echo html($secure_link['id']); ?>">
-                                                                <input type="hidden" name="current_status" value="<?php echo html($secure_link['is_active']); ?>">
-                                                                <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-power-off"></i> <?php echo $secure_link['is_active'] ? 'Disable' : 'Enable'; ?></button>
-                                                            </form>
-                                                            <form method="POST" action="index.php?page=public-sale-links" style="display:inline;" onsubmit="return confirm('Delete this secure sale link?');">
-                                                                <input type="hidden" name="action" value="delete_public_sale_link">
-                                                                <input type="hidden" name="link_id" value="<?php echo html($secure_link['id']); ?>">
-                                                                <button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-trash"></i> Delete</button>
-                                                            </form>
-                                                        </td>
-                                                    </tr>
-                                                <?php endforeach; ?>
-                                            <?php else: ?>
-                                                <tr><td colspan="6">No secure sale links created yet.</td></tr>
-                                            <?php endif; ?>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </section>
-                    <?php
-                    break;
-                case 'settings':
-                    if (!isAdmin()) {
-                        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                        redirect('dashboard');
-                    }
-                    $stmt_settings = $conn->prepare('SELECT setting_key, setting_value FROM settings');
-                    $stmt_settings->execute();
-                    $result_settings = $stmt_settings->get_result();
-                    $current_settings = [];
-                    while ($row = $result_settings->fetch_assoc()) {
-                        $current_settings[$row['setting_key']] = $row['setting_value'];
-                    }
-                    $stmt_settings->close();
+                        $stmt_settings = $conn->prepare("SELECT setting_key, setting_value FROM settings");
+                        $stmt_settings->execute();
+                        $result_settings = $stmt_settings->get_result();
+                        $current_settings = [];
+                        while ($row = $result_settings->fetch_assoc()) {
+                            $current_settings[$row['setting_key']] = $row['setting_value'];
+                        }
+                        $stmt_settings->close();
                     ?>
                         <section id="settings" class="page-content <?php echo $page === 'settings' ? 'active' : ''; ?>">
                             <div class="page-header">
@@ -8022,145 +5714,13 @@ if ($settings_result) {
                             </div>
                         </section>
                     <?php
-                    break;
-                case 'print-barcodes':
-                    if (!isAdmin()) {
-                        $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                        redirect('dashboard');
-                    }
-                    ?>
-                <section id="print-barcodes" class="page-content <?php echo $page === 'print-barcodes' ? 'active' : ''; ?>">
-                    <div class="page-header">
-                        <h1>Print Barcodes (A4)</h1>
-                    </div>
-                    <div class="card">
-                        <div class="form-group">
-                            <label>Select Product</label>
-                            <select id="print-barcode-select" style="width:100%; padding: 10px;">
-                                <option value="all">-- Print All Products --</option>
-                                <?php
-                                $books = $conn->query('SELECT id, name, barcode, retail_price, price FROM books WHERE barcode IS NOT NULL AND barcode != "" ORDER BY name ASC');
-                                while ($b = $books->fetch_assoc()) {
-                                    $bprice = $b['retail_price'] ?: $b['price'];
-                                    echo '<option value="' . html($b['barcode']) . '" data-name="' . html($b['name']) . '" data-price="' . html($bprice) . '">' . html($b['name']) . ' (' . html($b['barcode']) . ')</option>';
-                                }
-                                ?>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Copies per Barcode</label>
-                            <input type="number" id="print-barcode-copies" value="1" min="1" style="padding: 10px; width: 100%;">
-                        </div>
-                        <button type="button" class="btn btn-primary" onclick="generateBarcodePrint()"><i class="fas fa-print"></i> Generate A4 Print</button>
-                    </div>
-                    <script>
-                        function generateBarcodePrint() {
-                            const select = document.getElementById('print-barcode-select');
-                            const copies = parseInt(document.getElementById('print-barcode-copies').value) || 1;
-                            
-                            let items = [];
-                            if(select.value === 'all') {
-                                for(let i=1; i<select.options.length; i++) {
-                                    items.push({
-                                        barcode: select.options[i].value,
-                                        name: select.options[i].getAttribute('data-name'),
-                                        price: select.options[i].getAttribute('data-price')
-                                    });
-                                }
-                            } else {
-                                const opt = select.options[select.selectedIndex];
-                                items.push({
-                                    barcode: opt.value,
-                                    name: opt.getAttribute('data-name'),
-                                    price: opt.getAttribute('data-price')
-                                });
-                            }
-                            
-                            let htmlContent = `
-                                <html>
-                                <head>
-                                <title>Print Barcodes</title>
-                                <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"><\/script>
-                                <style>
-                                    @page { size: A4; margin: 0; }
-                                    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: white; }
-                                    .page { 
-                                        width: 210mm;
-                                        height: 297mm;
-                                        display: flex; 
-                                        flex-wrap: wrap; 
-                                        align-content: flex-start;
-                                        page-break-after: always;
-                                        padding: 10mm;
-                                        box-sizing: border-box;
-                                    }
-                                    .barcode-item {
-                                        width: calc(100% / 3);
-                                        height: calc((297mm - 20mm) / 6);
-                                        box-sizing: border-box;
-                                        padding: 5mm;
-                                        text-align: center;
-                                        display: flex;
-                                        flex-direction: column;
-                                        justify-content: center;
-                                        align-items: center;
-                                    }
-                                    .barcode-item svg { max-width: 100%; max-height: 60%; }
-                                    .b-name { font-size: 13px; font-weight: bold; margin-bottom: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-                                    .b-price { font-size: 14px; margin-top: 5px; font-weight: bold; }
-                                </style>
-                                </head>
-                                <body>
-                            `;
-                            
-                            let totalItems = [];
-                            items.forEach(it => {
-                                for(let i=0; i<copies; i++) totalItems.push(it);
-                            });
-                            
-                            let pages = Math.ceil(totalItems.length / 18);
-                            let itemIndex = 0;
-                            
-                            for(let p=0; p<pages; p++) {
-                                htmlContent += `<div class="page">`;
-                                for(let i=0; i<18 && itemIndex < totalItems.length; i++) {
-                                    let it = totalItems[itemIndex++];
-                                    htmlContent += `<div class="barcode-item">
-                                                <div class="b-name">${it.name}</div>
-                                                <svg class="barcode-svg" data-val="${it.barcode}"></svg>
-                                                <div class="b-price">${currentCurrencySymbol} ${it.price}</div>
-                                             </div>`;
-                                }
-                                htmlContent += `</div>`;
-                            }
-                            htmlContent += `
-                                <script>
-                                    window.onload = function() {
-                                        document.querySelectorAll('.barcode-svg').forEach(el => {
-                                            JsBarcode(el, el.getAttribute('data-val'), {
-                                                format: "CODE128", width: 1.5, height: 50, displayValue: true, fontSize: 14, margin: 0
-                                            });
-                                        });
-                                        setTimeout(() => { window.print(); }, 800);
-                                    }
-                                <\/script>
-                                </body></html>
-                            `;
-                            
-                            let printWin = window.open('', '_blank');
-                            printWin.document.write(htmlContent);
-                            printWin.document.close();
+                        break;
+                    case 'backup-restore':
+                        if (!isAdmin()) {
+                            $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
+                            redirect('dashboard');
                         }
-                    </script>
-                </section>
-                <?php
-                break;
-            case 'backup-restore':
-                if (!isAdmin()) {
-                    $_SESSION['toast'] = ['type' => 'error', 'message' => 'Unauthorized access.'];
-                    redirect('dashboard');
-                }
-                ?>
+                    ?>
                         <section id="backup-restore" class="page-content <?php echo $page === 'backup-restore' ? 'active' : ''; ?>">
                             <div class="page-header">
                                 <h1>Backup & Restore</h1>
@@ -8253,34 +5813,8 @@ if ($settings_result) {
                             <input type="number" id="book-price" name="price" step="0.01" min="0" required>
                         </div>
                         <div class="form-group">
-                            <label for="book-purchase-price">Purchase Price</label>
-                            <input type="number" id="book-purchase-price" name="purchase_price" step="0.01" min="0">
-                        </div>
-                        <div class="form-group">
                             <label for="book-stock">Stock Quantity</label>
                             <input type="number" id="book-stock" name="stock" min="0" required>
-                        </div>
-                    </div>
-                    <div class="flex-group">
-                        <div class="form-group">
-                            <label for="book-retail-price">Retail Rate</label>
-                            <input type="number" id="book-retail-price" name="retail_price" step="0.01" min="0">
-                        </div>
-                        <div class="form-group">
-                            <label for="book-wholesale-price">Wholesale Rate</label>
-                            <input type="number" id="book-wholesale-price" name="wholesale_price" step="0.01" min="0">
-                        </div>
-                    </div>
-                    <div class="flex-group">
-                        <div class="form-group">
-                            <label for="book-barcode">Barcode</label>
-                            <div class="inline-input-group">
-                                <input type="text" id="book-barcode" name="barcode" placeholder="Scan or type barcode">
-                                <button type="button" class="btn btn-secondary barcode-scan-btn" id="scan-book-barcode-btn"><i class="fas fa-barcode"></i> Scan</button>
-                            </div>
-                        </div>
-                        <div class="form-group" style="align-self:flex-end;">
-                            <button type="button" class="btn btn-secondary" id="print-book-barcode-btn"><i class="fas fa-print"></i> Print Barcode</button>
                         </div>
                     </div>
                     <div class="form-group">
@@ -8360,58 +5894,6 @@ if ($settings_result) {
                     <div class="form-actions">
                         <button type="button" class="btn btn-secondary modal-close">Cancel</button>
                         <button type="submit" class="btn btn-primary">Restock</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-        <div id="user-modal" class="modal-overlay">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3 id="user-modal-title">Add New User</h3>
-                    <button type="button" class="modal-close"><i class="fas fa-times"></i></button>
-                </div>
-                <form id="user-form" action="index.php?page=users" method="POST">
-                    <input type="hidden" name="action" value="save_user">
-                    <input type="hidden" id="sys-user-id" name="user_id">
-                    <div class="form-group">
-                        <label>Username</label>
-                        <input type="text" id="sys-username" name="username" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Role</label>
-                        <select id="sys-role-id" name="role_id" required></select>
-                    </div>
-                    <div class="form-group">
-                        <label>Password <small>(Leave blank to keep existing)</small></label>
-                        <input type="password" id="sys-password" name="password">
-                    </div>
-                    <div class="form-actions">
-                        <button type="button" class="btn btn-secondary modal-close">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Save User</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-        <div id="role-modal" class="modal-overlay">
-            <div class="modal-content" style="max-width: 700px;">
-                <div class="modal-header">
-                    <h3 id="role-modal-title">Add New Role</h3>
-                    <button type="button" class="modal-close"><i class="fas fa-times"></i></button>
-                </div>
-                <form id="role-form" action="index.php?page=users" method="POST">
-                    <input type="hidden" name="action" value="save_role">
-                    <input type="hidden" id="sys-role-id-form" name="role_id">
-                    <div class="form-group">
-                        <label>Role Name</label>
-                        <input type="text" id="sys-role-name" name="role_name" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Page Permissions</label>
-                        <div id="sys-role-permissions" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;"></div>
-                    </div>
-                    <div class="form-actions">
-                        <button type="button" class="btn btn-secondary modal-close">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Save Role</button>
                     </div>
                 </form>
             </div>
@@ -8594,13 +6076,13 @@ if ($settings_result) {
                             <label for="po-supplier">Supplier</label>
                             <select id="po-supplier" name="supplier_id" required>
                                 <?php
-                                $suppliers = $conn->query('SELECT id, name FROM suppliers ORDER BY name ASC')->fetch_all(MYSQLI_ASSOC);
+                                $suppliers = $conn->query("SELECT id, name FROM suppliers ORDER BY name ASC")->fetch_all(MYSQLI_ASSOC);
                                 if (!empty($suppliers)) {
                                     foreach ($suppliers as $supplier) {
-                                        echo '<option value="' . html($supplier['id']) . '">' . html($supplier['name']) . '</option>';
+                                        echo "<option value=\"" . html($supplier['id']) . "\">" . html($supplier['name']) . "</option>";
                                     }
                                 } else {
-                                    echo '<option value="">No Suppliers Available</option>';
+                                    echo "<option value=\"\">No Suppliers Available</option>";
                                 }
                                 ?>
                             </select>
@@ -8628,10 +6110,10 @@ if ($settings_result) {
                     <div class="card-header" style="margin-top: 20px;">Order Items</div>
                     <div class="flex-group">
                         <div class="form-group" style="flex-grow: 3;">
-                            <label for="po-book-select">Add Product</label><div class="inline-input-group" style="margin-bottom:10px;"><input type="text" id="po-barcode-search" placeholder="Scan barcode for PO item"><button type="button" class="btn btn-secondary barcode-scan-btn" id="scan-po-barcode-btn"><i class="fas fa-barcode"></i> Scan</button></div>
+                            <label for="po-book-select">Add Product</label>
                             <select id="po-book-select" style="width: 100%;">
                                 <option value="">-- Select a Product to Add --</option>
-                                <?php foreach ($all_books_for_po as $book): ?>
+                                <?php foreach ($all_books_for_po as $book) : ?>
                                     <option
                                         value="<?php echo html($book['id']); ?>"
                                         data-name="<?php echo html($book['name']); ?>"
@@ -8671,46 +6153,6 @@ if ($settings_result) {
                         <button type="button" class="btn btn-secondary modal-close">Cancel</button>
                         <button type="submit" class="btn btn-primary">Save Purchase Order</button>
                         <button type="button" class="btn btn-success" id="receive-po-btn" style="display: none;"><i class="fas fa-check-double"></i> Receive Order</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-        <div id="public-sale-link-modal" class="modal-overlay">
-            <div class="modal-content" style="max-width: 620px;">
-                <div class="modal-header">
-                    <h3 id="public-sale-link-modal-title">Create Secure Sale Link</h3>
-                    <button type="button" class="modal-close"><i class="fas fa-times"></i></button>
-                </div>
-                <form id="public-sale-link-form" action="index.php?page=public-sale-links" method="POST">
-                    <input type="hidden" name="action" value="save_public_sale_link">
-                    <input type="hidden" name="link_id" id="public-sale-link-id">
-                    <div class="form-group">
-                        <label for="public-sale-link-name">Link Name</label>
-                        <input type="text" name="link_name" id="public-sale-link-name" required>
-                    </div>
-                    <div class="flex-group">
-                        <div class="form-group">
-                            <label for="public-sale-link-password">Password</label>
-                            <input type="password" name="access_password" id="public-sale-link-password" placeholder="Required for new links">
-                        </div>
-                        <div class="form-group">
-                            <label for="public-sale-link-mode">Selling Mode</label>
-                            <select name="price_mode" id="public-sale-link-mode">
-                                <option value="retail">Retail Rate</option>
-                                <option value="wholesale">Wholesale Rate</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="public-sale-link-notes">Notes</label>
-                        <textarea name="notes" id="public-sale-link-notes" rows="3" placeholder="Shown to admin only"></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" name="is_active" id="public-sale-link-active" checked> Active</label>
-                    </div>
-                    <div class="form-actions">
-                        <button type="button" class="btn btn-secondary modal-close">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Save Secure Link</button>
                     </div>
                 </form>
             </div>
@@ -8832,7 +6274,7 @@ if ($settings_result) {
                         <label for="promotion-book-id">Select Product</label>
                         <select id="promotion-book-id" name="promotion_book_id">
                             <option value="">Select a Product</option>
-                            <?php foreach ($all_products as $product): ?>
+                            <?php foreach ($all_products as $product) : ?>
                                 <option value="<?php echo html($product['id']); ?>"><?php echo html($product['name'] . ($product['author'] ? ' by ' . $product['author'] : ' (' . ucfirst($product['product_type']) . ')')); ?></option>
                             <?php endforeach; ?>
                         </select>
@@ -8841,7 +6283,7 @@ if ($settings_result) {
                         <label for="promotion-category">Select Category</label>
                         <input type="text" id="promotion-category" name="promotion_category" list="book-categories-datalist">
                         <datalist id="book-categories-datalist">
-                            <?php foreach ($all_categories as $cat): ?>
+                            <?php foreach ($all_categories as $cat) : ?>
                                 <option value="<?php echo html($cat['category']); ?>">
                                 <?php endforeach; ?>
                         </datalist>
@@ -8960,8 +6402,6 @@ if ($settings_result) {
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
-    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <script>
         function html(text) {
             const div = document.createElement('div');
@@ -9397,9 +6837,9 @@ if ($settings_result) {
                 paginationConfig.elements.next.disabled = paginationConfig.currentPage === paginationConfig.totalPages;
             }
         }
-        async function fetchJSON(url, options = {}) {
+        async function fetchJSON(url) {
             try {
-                const response = await fetch(url, options);
+                const response = await fetch(url);
                 if (!response.ok) {
                     throw new Error(`HTTP error! Status: ${response.status}`);
                 }
@@ -9417,238 +6857,46 @@ if ($settings_result) {
                 };
             }
         }
-        let dashWeeklyChartInstance = null;
-        let dashTopChartInstance = null;
-        let dashMonthlyChartInstance = null;
-        let dashOrdersChartInstance = null;
-        
         async function updateDashboard() {
-            if (!document.getElementById('dash-today-rev')) return;
-            const statsData = await fetchJSON('index.php?action=get_dashboard_stats_json');
-            if (statsData.success) {
-                document.getElementById('dash-today-rev').textContent = formatCurrency(statsData.today_rev);
-                document.getElementById('dash-today-orders').textContent = statsData.today_cnt;
-                document.getElementById('dash-month-rev').textContent = formatCurrency(statsData.month_rev);
-                
-                const pendingEl = document.getElementById('dash-pending-orders');
-                pendingEl.textContent = statsData.pending_orders;
-                if(statsData.pending_orders > 0) pendingEl.classList.add('danger'); else pendingEl.classList.remove('danger');
-
-                document.getElementById('dash-total-products').textContent = statsData.total_products;
-                document.getElementById('dash-total-customers').textContent = statsData.total_customers;
-                document.getElementById('dash-total-suppliers').textContent = statsData.total_suppliers;
-                
-                const lowStockEl = document.getElementById('dash-low-stock');
-                lowStockEl.textContent = statsData.low_stock_cnt;
-                if(statsData.low_stock_cnt > 0) lowStockEl.classList.add('danger'); else lowStockEl.classList.remove('danger');
-                
-                document.getElementById('dash-stock-value').textContent = formatCurrency(statsData.stock_value);
-                document.getElementById('dash-lifetime-rev').textContent = formatCurrency(statsData.lifetime_rev);
-                document.getElementById('dash-total-expenses').textContent = formatCurrency(statsData.total_expenses);
-                document.getElementById('dash-active-promos').textContent = statsData.active_promos;
-
-                const ctxWeekly = document.getElementById('dash-weekly-chart').getContext('2d');
-                if (dashWeeklyChartInstance) dashWeeklyChartInstance.destroy();
-                dashWeeklyChartInstance = new Chart(ctxWeekly, {
-                    type: 'line',
-                    data: {
-                        labels: statsData.chart_weekly.labels,
-                        datasets: [{
-                            label: 'Revenue',
-                            data: statsData.chart_weekly.data,
-                            borderColor: '#3b82f6',
-                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                            fill: true,
-                            tension: 0.3
-                        }]
-                    },
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-                });
-
-                const ctxTop = document.getElementById('dash-top-chart').getContext('2d');
-                if (dashTopChartInstance) dashTopChartInstance.destroy();
-                dashTopChartInstance = new Chart(ctxTop, {
-                    type: 'doughnut',
-                    data: {
-                        labels: statsData.chart_top.map(i => i.name),
-                        datasets: [{
-                            data: statsData.chart_top.map(i => i.qty),
-                            backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
-                        }]
-                    },
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
-                });
-                
-                const ctxMonthly = document.getElementById('dash-monthly-chart').getContext('2d');
-                if (dashMonthlyChartInstance) dashMonthlyChartInstance.destroy();
-                dashMonthlyChartInstance = new Chart(ctxMonthly, {
-                    type: 'bar',
-                    data: {
-                        labels: statsData.chart_monthly.labels,
-                        datasets: [
-                            {
-                                label: 'Sales',
-                                data: statsData.chart_monthly.sales,
-                                backgroundColor: '#10b981'
-                            },
-                            {
-                                label: 'Expenses',
-                                data: statsData.chart_monthly.expenses,
-                                backgroundColor: '#ef4444'
-                            }
-                        ]
-                    },
-                    options: { responsive: true, maintainAspectRatio: false }
-                });
-                
-                const ctxOrders = document.getElementById('dash-orders-chart').getContext('2d');
-                if (dashOrdersChartInstance) dashOrdersChartInstance.destroy();
-                
-                const orderLabels = statsData.chart_orders.map(o => o.status.charAt(0).toUpperCase() + o.status.slice(1));
-                const orderData = statsData.chart_orders.map(o => o.cnt);
-                const orderColors = statsData.chart_orders.map(o => {
-                    if(o.status === 'pending') return '#f59e0b';
-                    if(o.status === 'approved') return '#10b981';
-                    if(o.status === 'rejected') return '#ef4444';
-                    return '#6b7280';
-                });
-                
-                dashOrdersChartInstance = new Chart(ctxOrders, {
-                    type: 'pie',
-                    data: {
-                        labels: orderLabels,
-                        datasets: [{
-                            data: orderData,
-                            backgroundColor: orderColors
-                        }]
-                    },
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
-                });
+            if (!elements.totalBooksCount) return;
+            const data = await fetchJSON('index.php?action=get_books_json&limit=1');
+            if (data.success) {
+                elements.totalBooksCount.textContent = data.total_items;
             }
-
-            const recentSalesData = await fetchJSON('index.php?action=get_sales_json&page_num=1&limit=5');
-            if (recentSalesData.success && elements.dashboardRecentSales) {
-                elements.dashboardRecentSales.innerHTML = recentSalesData.sales.length > 0 ? recentSalesData.sales.map(sale => `
-                    <tr>
-                        <td>${formatShortDate(html(sale.sale_date))}</td>
-                        <td>${html(sale.customer_name || 'Guest')}</td>
-                        <td>${formatCurrency(html(sale.total))}</td>
-                    </tr>
-                `).join('') : `<tr><td colspan="3">No recent sales.</td></tr>`;
+            const customerData = await fetchJSON('index.php?action=get_customers_json&status=active&limit=1');
+            if (customerData.success) {
+                elements.totalCustomersCount.textContent = customerData.total_items;
             }
-
-            const lowStockData = await fetchJSON('index.php?action=get_books_json&search=&sort=stock-asc&limit=10');
-            if (lowStockData.success && elements.dashboardLowStockBooks) {
+            const lowStockData = await fetchJSON('index.php?action=get_books_json&search=&sort=stock-asc&limit=99999');
+            if (lowStockData.success) {
                 const lowStockBooks = lowStockData.books.filter(book => book.stock < 5);
+                elements.lowStockCount.textContent = lowStockBooks.length;
+                elements.lowStockCount.classList.toggle('danger', lowStockBooks.length > 0);
                 elements.dashboardLowStockBooks.innerHTML = lowStockBooks.length > 0 ? lowStockBooks.map(book => `
                     <tr class="${book.stock < 5 ? 'low-stock' : ''}">
                         <td>${html(book.name)}</td>
+                        <td>${html(book.product_type === 'book' ? book.author : ucfirst(book.product_type))}</td>
                         <td>${html(book.stock)}</td>
-                        <td>
-                            <button class="btn btn-info btn-sm" onclick="openRestockModal(${html(book.id)}, '${html(book.name.replace(/'/g, "\\'"))}', ${html(book.stock)})"><i class="fas fa-box"></i></button>
-                        </td>
-                    </tr>
-                `).join('') : `<tr><td colspan="3">All stocks healthy.</td></tr>`;
-            }
-        }
-        let allRolesData = [];
-        const APP_PAGES = ['dashboard', 'books', 'users', 'customers', 'suppliers', 'purchase-orders', 'cart', 'sales-history', 'online-orders', 'promotions', 'expenses', 'reports', 'live-sales', 'settings', 'public-sale-links', 'print-barcodes', 'backup-restore'];
-        async function fetchUsersAndRoles() {
-            if (!document.getElementById('users-list')) return;
-            const roleData = await fetchJSON('index.php?action=get_roles_json');
-            if (roleData.success) {
-                allRolesData = roleData.roles;
-                document.getElementById('roles-list').innerHTML = roleData.roles.map(r => `
-                    <tr>
-                        <td>${html(r.name)}</td>
                         <td class="actions">
-                            <button class="btn btn-primary btn-sm" onclick="openRoleModal(${r.id})"><i class="fas fa-edit"></i> Edit</button>
-                            <form action="index.php?page=users" method="POST" style="display:inline;" onsubmit="return confirm('Delete this role?');">
-                                <input type="hidden" name="action" value="delete_role">
-                                <input type="hidden" name="role_id" value="${r.id}">
-                                <button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-trash"></i></button>
-                            </form>
+                            <button class="btn btn-info btn-sm" onclick="openRestockModal(${html(book.id)}, '${html(book.name)}', ${html(book.stock)})"><i class="fas fa-box"></i> Restock</button>
                         </td>
                     </tr>
-                `).join('');
-                
-                const roleSelect = document.getElementById('sys-role-id');
-                if (roleSelect) {
-                    roleSelect.innerHTML = roleData.roles.map(r => `<option value="${r.id}">${html(r.name)}</option>`).join('');
-                }
+                `).join('') : `<tr><td colspan="4">No products currently low in stock.</td></tr>`;
             }
-            const userData = await fetchJSON('index.php?action=get_users_json');
-            if (userData.success) {
-                document.getElementById('users-list').innerHTML = userData.users.map(u => `
-                    <tr>
-                        <td>${html(u.username)}</td>
-                        <td>${html(u.role_name || 'N/A')}</td>
-                        <td class="actions">
-                            <button class="btn btn-primary btn-sm" onclick="openUserModal(${u.id}, '${html(u.username)}', ${u.role_id})"><i class="fas fa-edit"></i> Edit</button>
-                            <form action="index.php?page=users" method="POST" style="display:inline;" onsubmit="return confirm('Delete this user?');">
-                                <input type="hidden" name="action" value="delete_user">
-                                <input type="hidden" name="user_id" value="${u.id}">
-                                <button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-trash"></i></button>
-                            </form>
-                        </td>
-                    </tr>
-                `).join('');
+            const todaySalesData = await fetchJSON('index.php?action=get_report_data_json&report_type=sales-daily&date=' + new Date().toISOString().slice(0, 10));
+            if (todaySalesData.success && todaySalesData.report_data.raw_data && todaySalesData.report_data.raw_data[1]) {
+                elements.todaySalesTotal.textContent = todaySalesData.report_data.raw_data[1].Value;
             }
-        }
-        
-        function openUserModal(id = '', username = '', roleId = '') {
-            document.getElementById('sys-user-id').value = id;
-            document.getElementById('sys-username').value = username;
-            document.getElementById('sys-role-id').value = roleId;
-            document.getElementById('sys-password').value = '';
-            document.getElementById('sys-password').required = id === '';
-            document.getElementById('user-modal-title').textContent = id ? 'Edit User' : 'Add New User';
-            document.getElementById('user-modal').classList.add('active');
-        }
-        
-        function openRoleModal(id = null) {
-            document.getElementById('sys-role-id-form').value = id || '';
-            let role = id ? allRolesData.find(r => r.id == id) : null;
-            document.getElementById('sys-role-name').value = role ? role.name : '';
-            document.getElementById('role-modal-title').textContent = role ? 'Edit Role' : 'Add New Role';
-            
-            const perms = role ? role.permissions : [];
-            document.getElementById('sys-role-permissions').innerHTML = APP_PAGES.map(p => `
-                <label style="display:flex; align-items:center; gap:8px;">
-                    <input type="checkbox" name="pages[]" value="${p}" ${perms.includes(p) ? 'checked' : ''}>
-                    ${p.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
-                </label>
-            `).join('');
-            
-            document.getElementById('role-modal').classList.add('active');
-        }
-        let liveSalesInterval = null;
-        async function fetchLiveSales() {
-            if (!document.getElementById('live-sales-list')) return;
-            const data = await fetchJSON('index.php?action=get_live_sales_json');
-            if (data.success) {
-                document.getElementById('live-today-rev').textContent = formatCurrency(data.summary.revenue);
-                document.getElementById('live-today-orders').textContent = data.summary.orders;
-                document.getElementById('live-today-disc').textContent = formatCurrency(data.summary.discount);
-
-                const list = document.getElementById('live-sales-list');
-                list.innerHTML = data.recent_sales.length > 0 ? data.recent_sales.map(sale => {
-                    const timeOnly = new Date(sale.sale_date).toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit', second:'2-digit'});
-                    let soldByText = html(sale.sold_by_user || 'System');
-                    if (sale.promotion_code && sale.promotion_code.startsWith('PUBLIC-LINK-')) {
-                        soldByText = `<span style="color:var(--info-color);" title="Public Scanner Sale"><i class="fas fa-satellite-dish"></i> ${html(sale.public_link_name || 'Secure Link')}</span>`;
-                    }
-                    return `
+            const recentSalesData = await fetchJSON('index.php?action=get_sales_json&page_num=1&limit=5');
+            if (recentSalesData.success) {
+                elements.dashboardRecentSales.innerHTML = recentSalesData.sales.length > 0 ? recentSalesData.sales.map(sale => `
                     <tr>
-                        <td style="font-weight: bold; color: var(--primary-color);">${timeOnly}</td>
-                        <td>${html(sale.id)}</td>
+                        <td>${formatDate(html(sale.sale_date))}</td>
                         <td>${html(sale.customer_name || 'Guest')}</td>
-                        <td>${soldByText}</td>
                         <td>${html(sale.item_names)}</td>
-                        <td>${formatCurrency(sale.discount)}</td>
-                        <td><strong style="color: var(--success-color);">${formatCurrency(sale.total)}</strong></td>
+                        <td>${formatCurrency(html(sale.total))}</td>
                     </tr>
-                `}).join('') : `<tr><td colspan="7">No transactions today yet.</td></tr>`;
+                `).join('') : `<tr><td colspan="4">No recent sales.</td></tr>`;
             }
         }
         async function renderBooks() {
@@ -9671,13 +6919,10 @@ if ($settings_result) {
                         <td>${html(book.stock)}</td>
                         <td class="actions">
                             <button class="btn btn-info btn-sm" onclick="openRestockModal(${html(book.id)}, '${html(book.name)}', ${html(book.stock)})"><i class="fas fa-box"></i> Restock</button>
-                            <?php if (isAdmin() || isStaff()): ?>
-                                <div style="display: inline-flex; align-items: center; gap: 4px; margin-bottom: 4px;">
-                                    <input type="number" id="qs-qty-${html(book.id)}" value="1" min="1" max="${html(book.stock)}" style="width: 50px; padding: 4px; height: 32px; border: 1px solid var(--border-color); border-radius: 6px;">
-                                    <button class="btn btn-sm btn-success" onclick="quickSell(${html(book.id)}, 'qs-qty-${html(book.id)}')"><i class="fas fa-bolt"></i> Quick Sell</button>
-                                </div>
+                            <?php if (isAdmin() || isStaff()) : ?>
+                                <button class="btn btn-sm btn-success" onclick="quickSell(${html(book.id)})"><i class="fas fa-bolt"></i> Quick Sell</button>
                             <?php endif; ?>
-                            <?php if (isAdmin()): ?>
+                            <?php if (isAdmin()) : ?>
                                 <button class="btn btn-primary btn-sm" onclick="openBookModal(${html(book.id)})"><i class="fas fa-edit"></i> Edit</button>
                                 <form action="index.php?page=books" method="POST" style="display:inline;" onsubmit="return confirm('Are you sure you want to delete this product?');">
                                     <input type="hidden" name="action" value="delete_book">
@@ -9721,7 +6966,6 @@ if ($settings_result) {
                     elements.bookYear.value = book.year;
                     elements.bookPrice.value = book.price;
                     elements.bookStock.value = book.stock;
-                    document.getElementById('book-purchase-price').value = book.purchase_price || '';
                     elements.bookDescription.value = book.description;
                     if (book.cover_image) {
                         elements.bookCoverPreview.src = book.cover_image;
@@ -9759,27 +7003,19 @@ if ($settings_result) {
                 elements.bookIsbn.required = false;
             }
         }
-        async function quickSell(bookId, qtyInputId = null) {
-            let qty = 1;
-            if (qtyInputId) {
-                const qtyInput = document.getElementById(qtyInputId);
-                if (qtyInput) qty = parseInt(qtyInput.value) || 1;
-            }
-            if (!confirm(`Quick Sell: Are you sure you want to sell ${qty} unit(s) of this product now?`)) {
+        async function quickSell(bookId) {
+            if (!confirm('Are you sure you want to perform a quick cash sale for 1 unit of this product?')) {
                 return;
             }
-            const data = await fetchJSON(`index.php?action=ajax_quick_sell`, {
+            const formData = new FormData();
+            formData.append('action', 'quick_sell');
+            formData.append('book_id', bookId);
+            const response = await fetch('index.php?page=books', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ book_id: bookId, quantity: qty })
+                body: formData
             });
-            if (data.success) {
-                showToast(data.message, 'success');
-                if (typeof renderBooks === 'function') renderBooks();
-                if (typeof updateDashboard === 'function') updateDashboard();
-            } else {
-                showToast(data.message || 'Quick sale failed.', 'error');
-            }
+            const textResponse = await response.text();
+            window.location.reload();
         }
         async function openRestockModal(bookId, name, stock) {
             elements.restockBookId.value = bookId;
@@ -9806,7 +7042,7 @@ if ($settings_result) {
                         <td>${customer.is_active ? 'Active' : 'Inactive'}</td>
                         <td class="actions">
                             <button class="btn btn-info btn-sm" onclick="viewCustomerHistory(${html(customer.id)}, '${html(customer.name)}')"><i class="fas fa-history"></i> History</button>
-                            <?php if (isAdmin()): ?>
+                            <?php if (isAdmin()) : ?>
                                 <button class="btn btn-primary btn-sm" onclick="openCustomerModal(${html(customer.id)})"><i class="fas fa-edit"></i> Edit</button>
                                 <form action="index.php?page=customers" method="POST" style="display:inline;">
                                     <input type="hidden" name="action" value="toggle_customer_status">
@@ -11071,12 +8307,6 @@ if ($settings_result) {
                     elements.sidebar.classList.toggle('active');
                 });
             }
-            if (document.getElementById('mobile-nav-toggle')) {
-                document.getElementById('mobile-nav-toggle').addEventListener('click', () => {
-                    elements.sidebar.classList.toggle('active');
-                    document.body.classList.toggle('sidebar-open');
-                });
-            }
             if (elements.modalCloseButtons) {
                 elements.modalCloseButtons.forEach(btn => {
                     btn.addEventListener('click', (e) => {
@@ -11439,11 +8669,6 @@ if ($settings_result) {
             const currentPage = "<?php echo $page; ?>";
             if (currentPage === 'dashboard') {
                 await updateDashboard();
-            } else if (currentPage === 'users') {
-                await fetchUsersAndRoles();
-            } else if (currentPage === 'live-sales') {
-                await fetchLiveSales();
-                liveSalesInterval = setInterval(fetchLiveSales, 5000);
             } else if (currentPage === 'books') {
                 await renderBooks();
             } else if (currentPage === 'customers') {
@@ -11456,7 +8681,7 @@ if ($settings_result) {
                 await renderBooksForCart(false);
                 await renderCart(false);
                 const lastSaleId = "<?php echo $_SESSION['last_sale_id'] ?? '';
-unset($_SESSION['last_sale_id']); ?>";
+                                    unset($_SESSION['last_sale_id']); ?>";
                 if (lastSaleId) {
                     const data = await fetchJSON(`index.php?action=get_sale_details_json&sale_id=${lastSaleId}`);
                     if (data.success) {
@@ -11536,726 +8761,6 @@ unset($_SESSION['last_sale_id']); ?>";
             }
         });
     </script>
-
-    <script id="minimalist-mobile-ux">
-        (function () {
-            function applyResponsiveTableLabels(root) {
-                (root || document).querySelectorAll('.data-table').forEach(function (table) {
-                    var headers = Array.prototype.map.call(table.querySelectorAll('thead th'), function (th) {
-                        return th.textContent.trim();
-                    });
-                    table.querySelectorAll('tbody tr').forEach(function (row) {
-                        Array.prototype.forEach.call(row.children, function (cell, index) {
-                            if (headers[index] && !cell.getAttribute('data-label')) {
-                                cell.setAttribute('data-label', headers[index]);
-                            }
-                        });
-                    });
-                });
-            }
-
-            function ensureBackdrop() {
-                if (document.querySelector('.sidebar-backdrop')) return;
-                var backdrop = document.createElement('div');
-                backdrop.className = 'sidebar-backdrop';
-                backdrop.addEventListener('click', function () {
-                    closeSidebar();
-                });
-                document.body.appendChild(backdrop);
-            }
-
-            function closeSidebar() {
-                var sidebar = document.querySelector('aside.sidebar');
-                if (!sidebar) return;
-                sidebar.classList.remove('active');
-                document.body.classList.remove('sidebar-open');
-            }
-
-            function syncSidebarState() {
-                var sidebar = document.querySelector('aside.sidebar');
-                if (!sidebar) return;
-                if (window.innerWidth > 900) {
-                    document.body.classList.remove('sidebar-open');
-                    sidebar.classList.remove('active');
-                } else {
-                    document.body.classList.toggle('sidebar-open', sidebar.classList.contains('active'));
-                }
-            }
-
-            document.addEventListener('DOMContentLoaded', function () {
-                ensureBackdrop();
-                applyResponsiveTableLabels(document);
-
-                var sidebar = document.querySelector('aside.sidebar');
-                var hamburger = document.getElementById('hamburger-menu');
-                if (sidebar && hamburger) {
-                    hamburger.addEventListener('click', function () {
-                        setTimeout(syncSidebarState, 0);
-                    });
-                    document.querySelectorAll('aside.sidebar nav a').forEach(function (link) {
-                        link.addEventListener('click', function () {
-                            if (window.innerWidth <= 900) {
-                                closeSidebar();
-                            }
-                        });
-                    });
-                }
-
-                var observer = new MutationObserver(function () {
-                    applyResponsiveTableLabels(document);
-                });
-                observer.observe(document.body, { childList: true, subtree: true });
-
-                var contactForm = document.getElementById('contact-message-form');
-                if (contactForm) {
-                    contactForm.addEventListener('submit', function (event) {
-                        event.preventDefault();
-                        if (typeof showToast === 'function') {
-                            showToast('Thank you for your message! We will get back to you soon.', 'success');
-                        }
-                        contactForm.reset();
-                    });
-                }
-
-                document.addEventListener('keydown', function (event) {
-                    if (event.key === 'Escape') {
-                        closeSidebar();
-                    }
-                });
-
-                window.addEventListener('resize', syncSidebarState);
-                syncSidebarState();
-            });
-        })();
-    </script>
-    <script id="advanced-sales-enhancements">
-        (function () {
-            const sidebarStateKey = 'bookshop_sidebar_state_v2';
-            let scannerInstance = null;
-            let scannerTargetHandler = null;
-            let publicSaleCart = [];
-            function qs(sel, root) { return (root || document).querySelector(sel); }
-            function qsa(sel, root) { return Array.from((root || document).querySelectorAll(sel)); }
-            function formatMoney(value) {
-                const num = Number(value || 0);
-                return (window.currentCurrencySymbol || 'PKR ') + num.toFixed(2);
-            }
-            function showAppToast(message, type) {
-                if (typeof window.showToast === 'function') {
-                    window.showToast(message, type || 'info');
-                }
-            }
-            function cloneHamburger() {
-                const oldBtn = document.getElementById('hamburger-menu');
-                if (!oldBtn) return null;
-                const newBtn = oldBtn.cloneNode(true);
-                oldBtn.parentNode.replaceChild(newBtn, oldBtn);
-                return newBtn;
-            }
-            function applySidebarState() {
-                const sidebar = document.querySelector('aside.sidebar');
-                if (!sidebar) return;
-                const saved = localStorage.getItem(sidebarStateKey) || 'expanded';
-                if (window.innerWidth <= 900) {
-                    document.body.classList.remove('sidebar-collapsed');
-                    document.body.classList.remove('sidebar-open');
-                    sidebar.classList.remove('active');
-                } else {
-                    document.body.classList.remove('sidebar-open');
-                    sidebar.classList.remove('active');
-                    document.body.classList.toggle('sidebar-collapsed', saved === 'collapsed');
-                }
-            }
-            function toggleSidebarState() {
-                const sidebar = document.querySelector('aside.sidebar');
-                if (!sidebar) return;
-                if (window.innerWidth <= 900) {
-                    const opening = !sidebar.classList.contains('active');
-                    sidebar.classList.toggle('active', opening);
-                    document.body.classList.toggle('sidebar-open', opening);
-                    localStorage.setItem(sidebarStateKey, opening ? 'mobile-open' : 'mobile-closed');
-                } else {
-                    const collapse = !document.body.classList.contains('sidebar-collapsed');
-                    document.body.classList.toggle('sidebar-collapsed', collapse);
-                    localStorage.setItem(sidebarStateKey, collapse ? 'collapsed' : 'expanded');
-                }
-            }
-            function closeMobileSidebar() {
-                const sidebar = document.querySelector('aside.sidebar');
-                if (!sidebar || window.innerWidth > 900) return;
-                sidebar.classList.remove('active');
-                document.body.classList.remove('sidebar-open');
-                localStorage.setItem(sidebarStateKey, 'mobile-closed');
-            }
-            function setupSidebar() {
-                const btn = cloneHamburger();
-                if (btn) {
-                    btn.addEventListener('click', function (event) {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        toggleSidebarState();
-                    });
-                }
-                qsa('aside.sidebar nav a').forEach(function (link) {
-                    link.addEventListener('click', closeMobileSidebar);
-                });
-                window.addEventListener('resize', applySidebarState);
-                applySidebarState();
-            }
-            function ensureBarcodeModal() {
-                if (document.getElementById('barcode-scanner-modal')) return;
-                const modal = document.createElement('div');
-                modal.id = 'barcode-scanner-modal';
-                modal.className = 'modal-overlay';
-                modal.innerHTML = `
-                    <div class="modal-content" style="max-width:700px;">
-                        <div class="modal-header">
-                            <h3>Scan Barcode</h3>
-                            <button type="button" class="modal-close" data-close-barcode-modal><i class="fas fa-times"></i></button>
-                        </div>
-                        <div id="barcode-scanner-reader" style="width:100%; min-height:320px; border-radius:18px; overflow:hidden; background:#111827;"></div>
-                        <div class="form-group" style="margin-top:16px;">
-                            <label for="barcode-scanner-manual">Manual Barcode</label>
-                            <div class="inline-input-group">
-                                <input type="text" id="barcode-scanner-manual" placeholder="Type barcode manually">
-                                <button type="button" class="btn btn-primary" id="barcode-scanner-manual-submit">Use Barcode</button>
-                            </div>
-                        </div>
-                    </div>`;
-                document.body.appendChild(modal);
-                modal.addEventListener('click', function (event) {
-                    if (event.target === modal || event.target.closest('[data-close-barcode-modal]')) {
-                        stopBarcodeScanner();
-                        modal.classList.remove('active');
-                    }
-                });
-                qs('#barcode-scanner-manual-submit', modal).addEventListener('click', function () {
-                    const value = qs('#barcode-scanner-manual', modal).value.trim();
-                    if (!value || !scannerTargetHandler) return;
-                    scannerTargetHandler(value);
-                    stopBarcodeScanner();
-                    modal.classList.remove('active');
-                });
-            }
-            function stopBarcodeScanner() {
-                try {
-                    if (scannerInstance && typeof scannerInstance.stop === 'function') {
-                        scannerInstance.stop().catch(function () {});
-                    }
-                } catch (e) {}
-                scannerInstance = null;
-                scannerTargetHandler = null;
-            }
-            function openBarcodeScanner(onDetected) {
-                ensureBarcodeModal();
-                const modal = document.getElementById('barcode-scanner-modal');
-                const readerId = 'barcode-scanner-reader';
-                scannerTargetHandler = function (decodedText) {
-                    onDetected(decodedText);
-                };
-                modal.classList.add('active');
-                setTimeout(function () { window.location.href = 'index.php?page=public-sale&token=' + encodeURIComponent(token); }, 8 * 60 * 60 * 1000);
-                if (window.Html5Qrcode) {
-                    stopBarcodeScanner();
-                    scannerInstance = new Html5Qrcode(readerId);
-                    scannerInstance.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 250, height: 120 } }, function (decodedText) {
-                        if (!scannerTargetHandler) return;
-                        scannerTargetHandler(decodedText);
-                        stopBarcodeScanner();
-                        modal.classList.remove('active');
-                    }, function () {}).catch(function () {
-                        showAppToast('Camera could not start. Use manual barcode entry.', 'warning');
-                    });
-                }
-            }
-            async function fetchBookByBarcode(barcode, token) {
-                const url = `index.php?action=get_book_by_barcode_json&barcode=${encodeURIComponent(barcode)}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
-                const response = await fetch(url);
-                return response.json();
-            }
-            function printBarcodeLabel(payload) {
-                if (!window.JsBarcode) {
-                    showAppToast('Barcode printer library failed to load.', 'error');
-                    return;
-                }
-                let copiesStr = prompt("How many copies do you want to print? (Layout is A4, 18 items per page)", "1");
-                if (copiesStr === null) return;
-                let copies = parseInt(copiesStr);
-                if (isNaN(copies) || copies < 1) copies = 1;
-
-                const popup = window.open('', '_blank', 'width=800,height=900');
-                if (!popup) {
-                    showAppToast('Please allow popups to print barcode labels.', 'warning');
-                    return;
-                }
-                const barcodeValue = payload.barcode || payload.isbn || String(payload.id || '');
-                let htmlContent = `<!DOCTYPE html><html><head><title>Print Barcodes</title>
-                    <style>
-                        @page { size: A4; margin: 0; }
-                        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: white; }
-                        .page { 
-                            width: 210mm; height: 297mm; display: flex; flex-wrap: wrap; align-content: flex-start;
-                            page-break-after: always; padding: 10mm; box-sizing: border-box;
-                        }
-                        .barcode-item {
-                            width: calc(100% / 3); height: calc((297mm - 20mm) / 6);
-                            box-sizing: border-box; padding: 5mm; text-align: center;
-                            display: flex; flex-direction: column; justify-content: center; align-items: center;
-                        }
-                        .barcode-item svg { max-width: 100%; max-height: 60%; }
-                        .b-name { font-size: 13px; font-weight: bold; margin-bottom: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-                        .b-price { font-size: 14px; margin-top: 5px; font-weight: bold; }
-                    </style>
-                    </head><body>`;
-
-                let pages = Math.ceil(copies / 18);
-                let printed = 0;
-                let displayPrice = payload.retail_price || payload.price || 0;
-                
-                for(let p = 0; p < pages; p++) {
-                    htmlContent += `<div class="page">`;
-                    for(let i = 0; i < 18 && printed < copies; i++) {
-                        htmlContent += `<div class="barcode-item">
-                                    <div class="b-name">${payload.name || 'Product'}</div>
-                                    <svg class="barcode-svg" data-val="${barcodeValue}"></svg>
-                                    <div class="b-price">${window.currentCurrencySymbol || 'PKR '} ${Number(displayPrice).toFixed(2)}</div>
-                                 </div>`;
-                        printed++;
-                    }
-                    htmlContent += `</div>`;
-                }
-                
-                htmlContent += `<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"><\/script>
-                    <script>
-                        window.onload = function() {
-                            document.querySelectorAll('.barcode-svg').forEach(el => {
-                                JsBarcode(el, el.getAttribute('data-val'), {
-                                    format: "CODE128", width: 1.5, height: 50, displayValue: true, fontSize: 14, margin: 0
-                                });
-                            });
-                            setTimeout(() => { window.print(); }, 800);
-                        }
-                    <\/script></body></html>`;
-
-                popup.document.write(htmlContent);
-                popup.document.close();
-            }
-            function enhanceBookForm() {
-                const retailInput = document.getElementById('book-retail-price');
-                const priceInput = document.getElementById('book-price');
-                const wholesaleInput = document.getElementById('book-wholesale-price');
-                const barcodeInput = document.getElementById('book-barcode');
-                if (!priceInput || !retailInput || !wholesaleInput || !barcodeInput) return;
-                if (!retailInput.value && priceInput.value) retailInput.value = priceInput.value;
-                priceInput.addEventListener('input', function () {
-                    retailInput.value = priceInput.value;
-                    if (!wholesaleInput.dataset.touched) wholesaleInput.value = priceInput.value;
-                });
-                wholesaleInput.addEventListener('input', function () {
-                    wholesaleInput.dataset.touched = '1';
-                });
-                const scanBtn = document.getElementById('scan-book-barcode-btn');
-                if (scanBtn && !scanBtn.dataset.bound) {
-                    scanBtn.dataset.bound = '1';
-                    scanBtn.addEventListener('click', function () {
-                        openBarcodeScanner(function (code) {
-                            barcodeInput.value = code;
-                        });
-                    });
-                }
-                const printBtn = document.getElementById('print-book-barcode-btn');
-                if (printBtn && !printBtn.dataset.bound) {
-                    printBtn.dataset.bound = '1';
-                    printBtn.addEventListener('click', function () {
-                        printBarcodeLabel({
-                            id: document.getElementById('book-id') ? document.getElementById('book-id').value : '',
-                            name: document.getElementById('book-name') ? document.getElementById('book-name').value : 'Product',
-                            category: document.getElementById('book-category') ? document.getElementById('book-category').value : '',
-                            barcode: barcodeInput.value,
-                            price: priceInput.value,
-                            retail_price: retailInput.value || priceInput.value,
-                            wholesale_price: wholesaleInput.value || priceInput.value
-                        });
-                    });
-                }
-            }
-            function patchOpenBookModal() {
-                if (typeof window.openBookModal !== 'function') return;
-                const original = window.openBookModal;
-                window.openBookModal = async function (bookId) {
-                    await original(bookId);
-                    enhanceBookForm();
-                    const priceInput = document.getElementById('book-price');
-                    const retailInput = document.getElementById('book-retail-price');
-                    const wholesaleInput = document.getElementById('book-wholesale-price');
-                    const barcodeInput = document.getElementById('book-barcode');
-                    if (!bookId) {
-                        if (priceInput && retailInput && !retailInput.value) retailInput.value = priceInput.value || '';
-                        if (priceInput && wholesaleInput && !wholesaleInput.value) wholesaleInput.value = priceInput.value || '';
-                        if (barcodeInput) barcodeInput.value = '';
-                        return;
-                    }
-                    try {
-                        const data = await fetch(`index.php?action=get_books_json&book_id=${encodeURIComponent(bookId)}`).then(r => r.json());
-                        if (data.success && data.books && data.books[0]) {
-                            const book = data.books[0];
-                            if (retailInput) retailInput.value = book.retail_price || book.price || '';
-                            if (wholesaleInput) wholesaleInput.value = book.wholesale_price || book.price || '';
-                            if (barcodeInput) barcodeInput.value = book.barcode || '';
-                        }
-                    } catch (e) {}
-                };
-            }
-            function patchRenderBooks() {
-                if (typeof window.renderBooks !== 'function') return;
-                const original = window.renderBooks;
-                window.renderBooks = async function () {
-                    await original();
-                    const search = document.getElementById('book-search');
-                    const sort = document.getElementById('book-sort');
-                    try {
-                        const data = await fetch(`index.php?action=get_books_json&search=${encodeURIComponent(search ? search.value : '')}&sort=${encodeURIComponent(sort ? sort.value : 'name-asc')}&page_num=${window.pagination && window.pagination.books ? window.pagination.books.currentPage : 1}`).then(r => r.json());
-                        if (!data.success) return;
-                        const rows = qsa('#books-list tr');
-                        data.books.forEach(function (book, index) {
-                            const row = rows[index];
-                            if (!row) return;
-                            const nameCell = row.children[1];
-                            const priceCell = row.children[5];
-                            const actionCell = row.children[7];
-                            if (nameCell && !nameCell.querySelector('.barcode-badge')) {
-                                const badge = document.createElement('div');
-                                badge.className = 'barcode-badge';
-                                badge.innerHTML = `<i class="fas fa-barcode"></i> ${html(book.barcode || book.isbn || 'No barcode')}`;
-                                nameCell.appendChild(badge);
-                            }
-                            if (priceCell) {
-                                priceCell.innerHTML = `${formatMoney(book.retail_price || book.price)}<div style="font-size:11px;color:var(--light-text-color);margin-top:4px;">WS: ${formatMoney(book.wholesale_price || book.price)}</div>`;
-                            }
-                            if (actionCell && !actionCell.querySelector('.print-book-barcode-row-btn')) {
-                                const btn = document.createElement('button');
-                                btn.type = 'button';
-                                btn.className = 'btn btn-secondary btn-sm print-book-barcode-row-btn';
-                                btn.innerHTML = '<i class="fas fa-print"></i> Barcode';
-                                btn.addEventListener('click', function () { printBarcodeLabel(book); });
-                                actionCell.appendChild(btn);
-                            }
-                        });
-                    } catch (e) {}
-                };
-            }
-            function bindPosAndPoBarcodeTools() {
-                const posBtn = document.getElementById('scan-pos-barcode-btn');
-                if (posBtn && !posBtn.dataset.bound) {
-                    posBtn.dataset.bound = '1';
-                    posBtn.addEventListener('click', function () {
-                        openBarcodeScanner(async function (barcode) {
-                            const data = await fetchBookByBarcode(barcode, '');
-                            if (data.success && data.book && typeof window.addToCart === 'function') {
-                                window.addToCart(Number(data.book.id), data.book.name, Number(data.book.retail_price || data.book.price || 0), false);
-                            } else {
-                                showAppToast(data.message || 'No product found for that barcode.', 'warning');
-                            }
-                        });
-                    });
-                }
-                const poBtn = document.getElementById('scan-po-barcode-btn');
-                const poInput = document.getElementById('po-barcode-search');
-                const poSelect = document.getElementById('po-book-select');
-                const poAdd = document.getElementById('add-selected-book-to-po-btn');
-                function handlePoBarcode(code) {
-                    if (poInput) poInput.value = code;
-                    fetchBookByBarcode(code, '').then(function (data) {
-                        if (!data.success || !data.book) {
-                            showAppToast(data.message || 'No product found for that barcode.', 'warning');
-                            return;
-                        }
-                        if (poSelect) poSelect.value = String(data.book.id);
-                        if (poAdd) poAdd.click();
-                    });
-                }
-                if (poBtn && !poBtn.dataset.bound) {
-                    poBtn.dataset.bound = '1';
-                    poBtn.addEventListener('click', function () { openBarcodeScanner(handlePoBarcode); });
-                }
-                if (poInput && !poInput.dataset.bound) {
-                    poInput.dataset.bound = '1';
-                    poInput.addEventListener('keydown', function (event) {
-                        if (event.key === 'Enter') {
-                            event.preventDefault();
-                            handlePoBarcode(poInput.value.trim());
-                        }
-                    });
-                }
-            }
-            function initSidebarProductNavigator() {
-                const sidebar = document.querySelector('aside.sidebar');
-                if (!sidebar || document.querySelector('.sidebar-product-navigator')) return;
-                const container = document.createElement('div');
-                container.className = 'sidebar-product-navigator';
-                container.innerHTML = `
-                    <div class="mini-title">Quick Products</div>
-                    <div class="form-group" style="margin-bottom:8px;"><input type="text" id="sidebar-product-search" placeholder="Search products"></div>
-                    <div class="sidebar-product-list" id="sidebar-product-list"><div style="font-size:12px;color:var(--light-text-color);">Loading…</div></div>`;
-                const userInfo = sidebar.querySelector('.user-info');
-                if (userInfo) sidebar.insertBefore(container, userInfo);
-                const input = container.querySelector('#sidebar-product-search');
-                const list = container.querySelector('#sidebar-product-list');
-                async function load() {
-                    try {
-                        const data = await fetch(`index.php?action=get_sidebar_products_json&search=${encodeURIComponent(input.value.trim())}`).then(r => r.json());
-                        if (!data.success) return;
-                        list.innerHTML = data.books.slice(0, 12).map(function (book) {
-                            return `<div class="sidebar-product-chip" data-book-id="${book.id}" data-book-name="${html(book.name)}" data-book-price="${Number(book.retail_price || book.price || 0)}">
-<strong>${html(book.name)}</strong>
-<div style="font-size:11px;color:var(--light-text-color);">${html(book.barcode || book.isbn || 'No barcode')} • ${formatMoney(book.display_price || book.retail_price || book.price || 0)}</div>
-</div>`;
-                        }).join('') || '<div style="font-size:12px;color:var(--light-text-color);">No products found.</div>';
-                        qsa('.sidebar-product-chip', list).forEach(function (chip) {
-                            chip.addEventListener('click', function () {
-                                if (typeof window.quickSell === 'function') {
-                                    window.quickSell(Number(chip.dataset.bookId));
-                                }
-                            });
-                            chip.addEventListener('contextmenu', function (e) {
-                                e.preventDefault();
-                                if (typeof window.openBookModal === 'function') {
-                                    window.openBookModal(Number(chip.dataset.bookId));
-                                } else {
-                                    window.location.href = 'index.php?page=books#edit-' + chip.dataset.bookId;
-                                }
-                            });
-                        });
-                    } catch (e) {}
-                }
-                input.addEventListener('input', load);
-                load();
-            }
-            function initSecureLinkManager() {
-                const addBtn = document.getElementById('add-public-sale-link-btn');
-                const modal = document.getElementById('public-sale-link-modal');
-                const form = document.getElementById('public-sale-link-form');
-                if (!addBtn || !modal || !form) return;
-                function openModal(data) {
-                    form.reset();
-                    qs('#public-sale-link-id').value = data && data.id ? data.id : '';
-                    qs('#public-sale-link-name').value = data && data.name ? data.name : '';
-                    qs('#public-sale-link-mode').value = data && data.mode ? data.mode : 'retail';
-                    qs('#public-sale-link-notes').value = data && data.notes ? data.notes : '';
-                    qs('#public-sale-link-active').checked = !data || String(data.active) !== '0';
-                    qs('#public-sale-link-password').value = '';
-                    qs('#public-sale-link-modal-title').textContent = data && data.id ? 'Edit Secure Sale Link' : 'Create Secure Sale Link';
-                    modal.classList.add('active');
-                }
-                addBtn.addEventListener('click', function () { openModal(null); });
-                qsa('.edit-public-sale-link-btn').forEach(function (btn) {
-                    btn.addEventListener('click', function () {
-                        openModal({
-                            id: btn.dataset.id,
-                            name: btn.dataset.name,
-                            mode: btn.dataset.mode,
-                            notes: btn.dataset.notes,
-                            active: btn.dataset.active
-                        });
-                    });
-                });
-                qsa('.copy-secure-link-btn').forEach(function (btn) {
-                    btn.addEventListener('click', async function () {
-                        try {
-                            await navigator.clipboard.writeText(btn.dataset.link);
-                            showAppToast('Secure link copied.', 'success');
-                        } catch (e) {
-                            showAppToast('Could not copy the link.', 'warning');
-                        }
-                    });
-                });
-            }
-            function initPublicSalePage() {
-                const page = document.getElementById('public-sale-page');
-                if (!page || page.dataset.access !== '1') return;
-                const token = page.dataset.token;
-                const rateMode = page.dataset.priceMode || 'retail';
-                const list = document.getElementById('public-sale-sidebar-products');
-                const cartTable = document.getElementById('public-sale-cart-items');
-                const cartTotal = document.getElementById('public-sale-grand-total');
-                const cartInput = document.getElementById('public-sale-cart-input');
-                const search = document.getElementById('public-sale-sidebar-search');
-                const category = document.getElementById('public-sale-sidebar-category');
-                const type = document.getElementById('public-sale-sidebar-type');
-                const scannerStatus = document.getElementById('public-sale-scanner-status');
-                const manualInput = document.getElementById('public-sale-manual-barcode');
-                const lastSaleId = Number(page.dataset.lastSaleId || 0);
-                function savePublicCart() {
-                    sessionStorage.setItem('public_sale_cart_' + token, JSON.stringify(publicSaleCart));
-                }
-                function loadPublicCart() {
-                    try {
-                        const raw = sessionStorage.getItem('public_sale_cart_' + token);
-                        publicSaleCart = raw ? JSON.parse(raw) : [];
-                    } catch (e) {
-                        publicSaleCart = [];
-                    }
-                }
-                function updatePublicCartView() {
-                    let total = 0;
-                    if (!publicSaleCart.length) {
-                        cartTable.innerHTML = '<tr><td colspan="6">No products scanned yet.</td></tr>';
-                    } else {
-                        cartTable.innerHTML = publicSaleCart.map(function (item, index) {
-                            const subtotal = Number(item.price) * Number(item.quantity);
-                            total += subtotal;
-                            return `<tr>
-<td><strong>${html(item.name)}</strong><div style="font-size:11px;color:var(--light-text-color);">${html(item.category || '')}</div></td>
-<td>${html(item.barcode || '-')}</td>
-<td>${formatMoney(item.price)}</td>
-<td><input type="number" min="1" value="${Number(item.quantity)}" data-public-sale-qty="${index}" style="width:82px;"></td>
-<td>${formatMoney(subtotal)}</td>
-<td><button type="button" class="btn btn-danger btn-sm" data-public-sale-remove="${index}"><i class="fas fa-trash"></i></button></td>
-</tr>`;
-                        }).join('');
-                    }
-                    cartTotal.textContent = formatMoney(total);
-                    cartInput.value = JSON.stringify(publicSaleCart.map(function (item) { return { bookId: item.bookId, quantity: item.quantity }; }));
-                    savePublicCart();
-                    qsa('[data-public-sale-remove]').forEach(function (btn) {
-                        btn.addEventListener('click', function () {
-                            publicSaleCart.splice(Number(btn.dataset.publicSaleRemove), 1);
-                            updatePublicCartView();
-                        });
-                    });
-                    qsa('[data-public-sale-qty]').forEach(function (input) {
-                        input.addEventListener('input', function () {
-                            const idx = Number(input.dataset.publicSaleQty);
-                            const value = Math.max(1, Number(input.value || 1));
-                            publicSaleCart[idx].quantity = value;
-                            updatePublicCartView();
-                        });
-                    });
-                }
-                function addPublicSaleItem(book) {
-                    const price = Number(book.link_price || book.display_price || (rateMode === 'wholesale' ? (book.wholesale_price || book.retail_price || book.price) : (book.retail_price || book.price)) || 0);
-                    const existing = publicSaleCart.find(function (item) { return Number(item.bookId) === Number(book.id); });
-                    if (existing) {
-                        existing.quantity += 1;
-                    } else {
-                        publicSaleCart.push({
-                            bookId: Number(book.id),
-                            name: book.name,
-                            barcode: book.barcode || book.isbn || '',
-                            price: price,
-                            quantity: 1,
-                            category: book.category || ''
-                        });
-                    }
-                    updatePublicCartView();
-                    if (scannerStatus) scannerStatus.textContent = 'Added ' + book.name;
-                }
-                async function loadSidebarProducts() {
-                    try {
-                        const data = await fetch(`index.php?action=get_sidebar_products_json&token=${encodeURIComponent(token)}&search=${encodeURIComponent(search.value)}&category=${encodeURIComponent(category.value)}&product_type=${encodeURIComponent(type.value)}`).then(r => r.json());
-                        if (!data.success) return;
-                        if (category && category.options.length <= 1) {
-                            data.categories.forEach(function (cat) {
-                                const opt = document.createElement('option');
-                                opt.value = cat;
-                                opt.textContent = cat;
-                                category.appendChild(opt);
-                            });
-                        }
-                        list.innerHTML = data.books.map(function (book) {
-                            return `<div class="public-sale-product-item" data-public-sale-book='${JSON.stringify(book).replace(/'/g, '&apos;')}'>
-<strong>${html(book.name)}</strong>
-<div style="font-size:12px;color:var(--light-text-color);">${html(book.barcode || book.isbn || 'No barcode')} • ${html(book.category || '')}</div>
-<div style="margin-top:6px;font-weight:700;">${formatMoney(book.display_price)}</div>
-</div>`;
-                        }).join('') || '<div style="font-size:12px;color:var(--light-text-color);">No products found.</div>';
-                        qsa('.public-sale-product-item', list).forEach(function (card) {
-                            card.addEventListener('click', function () {
-                                const data = JSON.parse(card.getAttribute('data-public-sale-book').replace(/&apos;/g, "'"));
-                                addPublicSaleItem(data);
-                            });
-                        });
-                    } catch (e) {}
-                }
-                async function processBarcode(code) {
-                    if (!code) return;
-                    try {
-                        const data = await fetchBookByBarcode(code, token);
-                        if (data.success && data.book) {
-                            addPublicSaleItem(data.book);
-                            if (manualInput) manualInput.value = '';
-                        } else {
-                            showAppToast(data.message || 'No product found for this barcode.', 'warning');
-                            if (scannerStatus) scannerStatus.textContent = 'No match for ' + code;
-                        }
-                    } catch (e) {
-                        showAppToast('Barcode lookup failed.', 'error');
-                    }
-                }
-                search.addEventListener('input', loadSidebarProducts);
-                category.addEventListener('change', loadSidebarProducts);
-                type.addEventListener('change', loadSidebarProducts);
-                document.getElementById('public-sale-barcode-submit').addEventListener('click', function () { processBarcode(manualInput.value.trim()); });
-                manualInput.addEventListener('keydown', function (event) {
-                    if (event.key === 'Enter') {
-                        event.preventDefault();
-                        processBarcode(manualInput.value.trim());
-                    }
-                });
-                document.getElementById('public-sale-clear-cart').addEventListener('click', function () {
-                    publicSaleCart = [];
-                    updatePublicCartView();
-                });
-                document.getElementById('public-sale-submit-form').addEventListener('submit', function (event) {
-                    if (!publicSaleCart.length) {
-                        event.preventDefault();
-                        showAppToast('Scan at least one product first.', 'warning');
-                    }
-                });
-                loadPublicCart();
-                updatePublicCartView();
-                loadSidebarProducts();
-                setTimeout(function () { window.location.href = 'index.php?page=public-sale&token=' + encodeURIComponent(token); }, 8 * 60 * 60 * 1000);
-                if (window.Html5Qrcode) {
-                    const scanner = new Html5Qrcode('public-sale-scanner');
-                    scanner.start({ facingMode: 'environment' }, { fps: 12, qrbox: { width: 260, height: 120 } }, function (decodedText) {
-                        processBarcode(decodedText);
-                    }, function () {}).then(function () {
-                        if (scannerStatus) scannerStatus.textContent = 'Live scanner running';
-                    }).catch(function () {
-                        if (scannerStatus) scannerStatus.textContent = 'Camera unavailable. Use manual barcode entry.';
-                    });
-                    window.addEventListener('beforeunload', function () {
-                        try { scanner.stop(); } catch (e) {}
-                    });
-                }
-                if (lastSaleId && typeof window.fetchJSON === 'function' && typeof window.openReceiptModal === 'function') {
-                    window.fetchJSON(`index.php?action=get_sale_details_json&sale_id=${lastSaleId}&token=${encodeURIComponent(token)}`).then(function (data) {
-                        if (data.success && data.sale) {
-                            window.openReceiptModal(data.sale);
-                            sessionStorage.removeItem('public_sale_cart_' + token);
-                            publicSaleCart = [];
-                            updatePublicCartView();
-                        }
-                    });
-                }
-            }
-            document.addEventListener('DOMContentLoaded', function () {
-                setupSidebar();
-                ensureBarcodeModal();
-                patchOpenBookModal();
-                patchRenderBooks();
-                enhanceBookForm();
-                const currentPage = '<?php echo $page; ?>';
-                if (currentPage === 'books' && typeof window.renderBooks === 'function') { window.renderBooks(); }
-                bindPosAndPoBarcodeTools();
-                initSidebarProductNavigator();
-                initSecureLinkManager();
-                initPublicSalePage();
-            });
-        })();
-    </script>
-
 </body>
 
 </html>

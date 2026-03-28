@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1:3306
--- Generation Time: Feb 12, 2026 at 04:50 PM
+-- Generation Time: Mar 28, 2026 at 05:36 PM
 -- Server version: 8.2.0
 -- PHP Version: 8.3.0
 
@@ -34,9 +34,13 @@ CREATE TABLE `books` (
   `author` varchar(255) NOT NULL,
   `category` varchar(100) DEFAULT NULL,
   `isbn` varchar(20) NOT NULL,
+  `barcode` varchar(120) DEFAULT NULL,
   `publisher` varchar(255) DEFAULT NULL,
   `year` int DEFAULT NULL,
   `price` decimal(10,2) NOT NULL,
+  `purchase_price` decimal(12,2) DEFAULT NULL,
+  `retail_price` decimal(12,2) DEFAULT NULL,
+  `wholesale_price` decimal(12,2) DEFAULT NULL,
   `stock` int NOT NULL DEFAULT '0',
   `description` text,
   `cover_image` varchar(255) DEFAULT NULL,
@@ -48,14 +52,14 @@ CREATE TABLE `books` (
 -- Dumping data for table `books`
 --
 
-INSERT INTO `books` (`id`, `product_type`, `name`, `author`, `category`, `isbn`, `publisher`, `year`, `price`, `stock`, `description`, `cover_image`, `created_at`, `updated_at`) VALUES
-(1, 'book', 'The Alchemist', 'Paulo Coelho', 'Fiction', '978-0061122415', 'HarperOne', 1988, 850.00, 17, '0', 'uploads/covers/cover_698df6f0e3f22.webp', '2025-08-30 09:37:13', '2026-02-12 15:51:12'),
-(2, 'book', 'Sapiens: A Brief History of Humankind', 'Yuval Noah Harari', 'History', '978-0062316097', 'Harper Perennial', 2014, 1200.00, 7, '0', 'uploads/covers/cover_698df6e56248f.jpg', '2025-08-30 09:37:13', '2026-02-12 15:51:01'),
-(3, 'book', 'The Art of Thinking Clearly', 'Rolf Dobelli', 'Self-Help', '978-0062218391', 'HarperCollins', 2011, 700.00, 3, '99', 'uploads/covers/cover_698df6fca3392.webp', '2025-08-30 09:37:13', '2026-02-12 15:51:24'),
-(4, 'book', '1984', 'George Orwell', 'Dystopian', '978-0451524935', 'Signet Classic', 1949, 600.00, 20, '0', 'uploads/covers/cover_698df6b8e97d8.webp', '2025-08-30 09:37:13', '2026-02-12 15:50:16'),
-(5, 'book', 'Rich Dad Poor Dad', 'Robert Kiyosaki', 'Finance', '978-0446677455', 'Plata Publishing', 1997, 950.00, 4, '0', 'uploads/covers/cover_698df6d47725a.webp', '2025-08-30 09:37:13', '2026-02-12 15:50:44'),
-(6, 'book', 'To Kill a Mockingbird', 'Harper Lee', 'Classic', '978-0446310789', 'Grand Central Publishing', 1960, 750.00, 24, '0', 'uploads/covers/cover_698df7196dec8.jpg', '2025-08-30 09:37:13', '2026-02-12 15:51:53'),
-(7, 'book', 'The Great Gatsby', 'F. Scott Fitzgerald', 'Classic', '9780743273565', '', 1992, 15.99, 100, '0', 'uploads/covers/cover_698df70f3ed57.jpg', '2026-01-29 16:39:07', '2026-02-12 15:51:43');
+INSERT INTO `books` (`id`, `product_type`, `name`, `author`, `category`, `isbn`, `barcode`, `publisher`, `year`, `price`, `purchase_price`, `retail_price`, `wholesale_price`, `stock`, `description`, `cover_image`, `created_at`, `updated_at`) VALUES
+(1, 'book', 'The Alchemist', 'Paulo Coelho', 'Fiction', '978-0061122415', '9780061122415', 'HarperOne', 1988, 850.00, NULL, 850.00, 850.00, 17, '0', 'uploads/covers/cover_698df6f0e3f22.webp', '2025-08-30 09:37:13', '2026-03-28 16:24:30'),
+(2, 'book', 'Sapiens: A Brief History of Humankind', 'Yuval Noah Harari', 'History', '978-0062316097', '9780062316097', 'Harper Perennial', 2014, 1200.00, NULL, 1200.00, 1200.00, 7, '0', 'uploads/covers/cover_698df6e56248f.jpg', '2025-08-30 09:37:13', '2026-03-28 16:24:30'),
+(3, 'book', 'The Art of Thinking Clearly', 'Rolf Dobelli', 'Self-Help', '978-0062218391', '9780062218391', 'HarperCollins', 2011, 700.00, NULL, 700.00, 700.00, 3, '99', 'uploads/covers/cover_698df6fca3392.webp', '2025-08-30 09:37:13', '2026-03-28 16:24:30'),
+(4, 'book', '1984', 'George Orwell', 'Dystopian', '978-0451524935', '9780451524935', 'Signet Classic', 1949, 600.00, NULL, 600.00, 600.00, 18, '0', 'uploads/covers/cover_698df6b8e97d8.webp', '2025-08-30 09:37:13', '2026-03-28 16:24:30'),
+(5, 'book', 'Rich Dad Poor Dad', 'Robert Kiyosaki', 'Finance', '978-0446677455', '9780446677455', 'Plata Publishing', 1997, 950.00, NULL, 950.00, 950.00, 3, '0', 'uploads/covers/cover_698df6d47725a.webp', '2025-08-30 09:37:13', '2026-03-28 16:24:30'),
+(6, 'book', 'To Kill a Mockingbird', 'Harper Lee', 'Classic', '978-0446310789', '9780446310789', 'Grand Central Publishing', 1960, 750.00, NULL, 750.00, 750.00, 24, '0', 'uploads/covers/cover_698df7196dec8.jpg', '2025-08-30 09:37:13', '2026-03-28 16:24:30'),
+(7, 'book', 'The Great Gatsby', 'F. Scott Fitzgerald', 'Classic', '9780743273565', '9780743273565', '', 1992, 15.99, NULL, 15.99, 15.99, 100, '0', 'uploads/covers/cover_698df70f3ed57.jpg', '2026-01-29 16:39:07', '2026-03-28 16:24:30');
 
 -- --------------------------------------------------------
 
@@ -83,7 +87,8 @@ INSERT INTO `customers` (`id`, `name`, `phone`, `email`, `password_hash`, `addre
 (1, 'Ali Khan', '03001234567', 'ali.khan@example.com', NULL, 'Street 5, Sector G-8, Islamabad', 1, '2025-08-30 09:37:13', '2025-08-30 09:37:13'),
 (2, 'Sara Ahmed', '03337654321', 'sara.ahmed@example.com', NULL, 'House 12, Gulberg III, Lahore', 1, '2025-08-30 09:37:13', '2025-08-30 09:37:13'),
 (3, 'Usman Tariq', '03219876543', 'usman.tariq@example.com', NULL, 'Block A, DHA Phase V, Karachi', 1, '2025-08-30 09:37:13', '2025-08-30 09:37:13'),
-(4, 'Fatima Zohra', '03451122334', 'fatima.z@example.com', NULL, 'Apartment 7, F-10 Markaz, Islamabad', 0, '2025-08-30 09:37:13', '2025-08-30 09:37:13');
+(4, 'Fatima Zohra', '03451122334', 'fatima.z@example.com', NULL, 'Apartment 7, F-10 Markaz, Islamabad', 0, '2025-08-30 09:37:13', '2025-08-30 09:37:13'),
+(5, 'khan', '03139842219', 'khan@khan.com', '$2y$10$UnCaaZmQNF91Gz2.hkst4OI77JSZhi83CEoL4novJwF.jv94a56zi', 'Baker Khel Street', 1, '2026-02-12 16:54:26', '2026-02-12 16:54:26');
 
 -- --------------------------------------------------------
 
@@ -130,6 +135,14 @@ CREATE TABLE `online_orders` (
   `sale_id` int DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+--
+-- Dumping data for table `online_orders`
+--
+
+INSERT INTO `online_orders` (`id`, `customer_id`, `order_date`, `status`, `subtotal`, `discount`, `total`, `promotion_code`, `sale_id`) VALUES
+(1, 5, '2026-02-12 17:12:12', 'approved', 950.00, 0.00, 950.00, NULL, 10),
+(2, 5, '2026-02-12 17:27:38', 'rejected', 600.00, 0.00, 600.00, NULL, NULL);
+
 -- --------------------------------------------------------
 
 --
@@ -144,6 +157,14 @@ CREATE TABLE `online_order_items` (
   `price_per_unit` decimal(10,2) NOT NULL,
   `discount_per_unit` decimal(10,2) NOT NULL DEFAULT '0.00'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+--
+-- Dumping data for table `online_order_items`
+--
+
+INSERT INTO `online_order_items` (`id`, `order_id`, `book_id`, `quantity`, `price_per_unit`, `discount_per_unit`) VALUES
+(1, 1, 5, 1, 950.00, 0.00),
+(2, 2, 4, 1, 600.00, 0.00);
 
 -- --------------------------------------------------------
 
@@ -198,6 +219,32 @@ INSERT INTO `promotions` (`id`, `code`, `type`, `value`, `applies_to`, `applies_
 -- --------------------------------------------------------
 
 --
+-- Table structure for table `public_sale_links`
+--
+
+CREATE TABLE `public_sale_links` (
+  `id` int NOT NULL,
+  `token` varchar(120) NOT NULL,
+  `link_name` varchar(190) NOT NULL,
+  `password_hash` varchar(255) NOT NULL,
+  `price_mode` enum('retail','wholesale') NOT NULL DEFAULT 'retail',
+  `created_by` int DEFAULT NULL,
+  `notes` text,
+  `is_active` tinyint(1) NOT NULL DEFAULT '1',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+--
+-- Dumping data for table `public_sale_links`
+--
+
+INSERT INTO `public_sale_links` (`id`, `token`, `link_name`, `password_hash`, `price_mode`, `created_by`, `notes`, `is_active`, `created_at`, `updated_at`) VALUES
+(1, '0423863a82654102a4767862a41b85e66a1e6d88', 'Naeem', '$2y$10$bc/C.OsF.HzPcdOfW5Ao9.DKSCtY55nqn8A8fdJoIW4c.qIhNDOIK', 'retail', 1, '', 1, '2026-03-28 16:57:46', '2026-03-28 16:57:46');
+
+-- --------------------------------------------------------
+
+--
 -- Table structure for table `purchase_orders`
 --
 
@@ -224,6 +271,66 @@ INSERT INTO `purchase_orders` (`id`, `supplier_id`, `user_id`, `order_date`, `ex
 -- --------------------------------------------------------
 
 --
+-- Table structure for table `roles`
+--
+
+CREATE TABLE `roles` (
+  `id` int NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+--
+-- Dumping data for table `roles`
+--
+
+INSERT INTO `roles` (`id`, `name`, `created_at`) VALUES
+(1, 'admin', '2026-03-28 17:11:32'),
+(2, 'staff', '2026-03-28 17:11:32');
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `role_page_permissions`
+--
+
+CREATE TABLE `role_page_permissions` (
+  `role_id` int NOT NULL,
+  `page_key` varchar(100) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+--
+-- Dumping data for table `role_page_permissions`
+--
+
+INSERT INTO `role_page_permissions` (`role_id`, `page_key`) VALUES
+(1, 'backup-restore'),
+(1, 'books'),
+(1, 'cart'),
+(1, 'customers'),
+(1, 'dashboard'),
+(1, 'expenses'),
+(1, 'live-sales'),
+(1, 'online-orders'),
+(1, 'print-barcodes'),
+(1, 'promotions'),
+(1, 'public-sale-links'),
+(1, 'purchase-orders'),
+(1, 'reports'),
+(1, 'sales-history'),
+(1, 'settings'),
+(1, 'suppliers'),
+(1, 'users'),
+(2, 'books'),
+(2, 'cart'),
+(2, 'customers'),
+(2, 'dashboard'),
+(2, 'online-orders'),
+(2, 'sales-history');
+
+-- --------------------------------------------------------
+
+--
 -- Table structure for table `sales`
 --
 
@@ -246,7 +353,10 @@ INSERT INTO `sales` (`id`, `customer_id`, `user_id`, `sale_date`, `subtotal`, `d
 (1, 1, 1, '2025-08-28 09:37:13', 2050.00, 0.00, 2050.00, NULL),
 (2, 2, 2, '2025-08-20 09:37:13', 1900.00, 0.00, 1900.00, NULL),
 (3, NULL, 1, '2025-08-15 09:37:13', 600.00, 0.00, 600.00, NULL),
-(9, NULL, 1, '2025-08-30 09:48:58', 750.00, 0.00, 750.00, NULL);
+(9, NULL, 1, '2025-08-30 09:48:58', 750.00, 0.00, 750.00, NULL),
+(10, 5, 1, '2026-02-12 17:12:12', 950.00, 0.00, 950.00, NULL),
+(11, NULL, 1, '2026-03-28 10:25:42', 600.00, 0.00, 600.00, NULL),
+(12, NULL, 1, '2026-03-28 10:25:47', 600.00, 0.00, 600.00, NULL);
 
 -- --------------------------------------------------------
 
@@ -272,7 +382,10 @@ INSERT INTO `sale_items` (`id`, `sale_id`, `book_id`, `quantity`, `price_per_uni
 (2, 1, 2, 1, 1200.00, 0.00),
 (3, 2, 5, 2, 950.00, 0.00),
 (4, 3, 4, 1, 600.00, 0.00),
-(5, 9, 6, 1, 750.00, 0.00);
+(5, 9, 6, 1, 750.00, 0.00),
+(6, 10, 5, 1, 950.00, 0.00),
+(7, 11, 4, 1, 600.00, 0.00),
+(8, 12, 4, 1, 600.00, 0.00);
 
 -- --------------------------------------------------------
 
@@ -340,6 +453,7 @@ CREATE TABLE `users` (
   `username` varchar(50) NOT NULL,
   `password_hash` varchar(255) NOT NULL,
   `role` enum('admin','staff') NOT NULL DEFAULT 'staff',
+  `role_id` int DEFAULT NULL,
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -347,9 +461,9 @@ CREATE TABLE `users` (
 -- Dumping data for table `users`
 --
 
-INSERT INTO `users` (`id`, `username`, `password_hash`, `role`, `created_at`) VALUES
-(1, 'admin', '$2y$10$GQGukXNletAY.xjqLRW9nes0sLx8A26Uzy50gUWxiQHO9zL9f1hL.', 'admin', '2025-08-30 09:37:13'),
-(2, 'staff', '$2y$10$GQGukXNletAY.xjqLRW9nes0sLx8A26Uzy50gUWxiQHO9zL9f1hL.', 'staff', '2025-08-30 09:37:13');
+INSERT INTO `users` (`id`, `username`, `password_hash`, `role`, `role_id`, `created_at`) VALUES
+(1, 'admin', '$2y$10$GQGukXNletAY.xjqLRW9nes0sLx8A26Uzy50gUWxiQHO9zL9f1hL.', 'admin', 1, '2025-08-30 09:37:13'),
+(2, 'staff', '$2y$10$GQGukXNletAY.xjqLRW9nes0sLx8A26Uzy50gUWxiQHO9zL9f1hL.', 'staff', 2, '2025-08-30 09:37:13');
 
 --
 -- Indexes for dumped tables
@@ -360,7 +474,8 @@ INSERT INTO `users` (`id`, `username`, `password_hash`, `role`, `created_at`) VA
 --
 ALTER TABLE `books`
   ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `isbn` (`isbn`);
+  ADD UNIQUE KEY `isbn` (`isbn`),
+  ADD KEY `idx_books_barcode` (`barcode`);
 
 --
 -- Indexes for table `customers`
@@ -409,12 +524,32 @@ ALTER TABLE `promotions`
   ADD UNIQUE KEY `code` (`code`);
 
 --
+-- Indexes for table `public_sale_links`
+--
+ALTER TABLE `public_sale_links`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `token` (`token`);
+
+--
 -- Indexes for table `purchase_orders`
 --
 ALTER TABLE `purchase_orders`
   ADD PRIMARY KEY (`id`),
   ADD KEY `supplier_id` (`supplier_id`),
   ADD KEY `user_id` (`user_id`);
+
+--
+-- Indexes for table `roles`
+--
+ALTER TABLE `roles`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `name` (`name`);
+
+--
+-- Indexes for table `role_page_permissions`
+--
+ALTER TABLE `role_page_permissions`
+  ADD PRIMARY KEY (`role_id`,`page_key`);
 
 --
 -- Indexes for table `sales`
@@ -452,7 +587,8 @@ ALTER TABLE `suppliers`
 --
 ALTER TABLE `users`
   ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `username` (`username`);
+  ADD UNIQUE KEY `username` (`username`),
+  ADD KEY `idx_users_role_id` (`role_id`);
 
 --
 -- AUTO_INCREMENT for dumped tables
@@ -468,7 +604,7 @@ ALTER TABLE `books`
 -- AUTO_INCREMENT for table `customers`
 --
 ALTER TABLE `customers`
-  MODIFY `id` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
+  MODIFY `id` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
 
 --
 -- AUTO_INCREMENT for table `expenses`
@@ -480,13 +616,13 @@ ALTER TABLE `expenses`
 -- AUTO_INCREMENT for table `online_orders`
 --
 ALTER TABLE `online_orders`
-  MODIFY `id` int NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
 
 --
 -- AUTO_INCREMENT for table `online_order_items`
 --
 ALTER TABLE `online_order_items`
-  MODIFY `id` int NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
 
 --
 -- AUTO_INCREMENT for table `po_items`
@@ -501,28 +637,40 @@ ALTER TABLE `promotions`
   MODIFY `id` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
 
 --
+-- AUTO_INCREMENT for table `public_sale_links`
+--
+ALTER TABLE `public_sale_links`
+  MODIFY `id` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
+
+--
 -- AUTO_INCREMENT for table `purchase_orders`
 --
 ALTER TABLE `purchase_orders`
   MODIFY `id` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
 
 --
+-- AUTO_INCREMENT for table `roles`
+--
+ALTER TABLE `roles`
+  MODIFY `id` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
+
+--
 -- AUTO_INCREMENT for table `sales`
 --
 ALTER TABLE `sales`
-  MODIFY `id` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=10;
+  MODIFY `id` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=13;
 
 --
 -- AUTO_INCREMENT for table `sale_items`
 --
 ALTER TABLE `sale_items`
-  MODIFY `id` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
+  MODIFY `id` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=9;
 
 --
 -- AUTO_INCREMENT for table `settings`
 --
 ALTER TABLE `settings`
-  MODIFY `id` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=771;
+  MODIFY `id` int NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=761;
 
 --
 -- AUTO_INCREMENT for table `suppliers`
@@ -576,6 +724,12 @@ ALTER TABLE `purchase_orders`
   ADD CONSTRAINT `purchase_orders_ibfk_2` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT;
 
 --
+-- Constraints for table `role_page_permissions`
+--
+ALTER TABLE `role_page_permissions`
+  ADD CONSTRAINT `fk_role_page_permissions_role` FOREIGN KEY (`role_id`) REFERENCES `roles` (`id`) ON DELETE CASCADE;
+
+--
 -- Constraints for table `sales`
 --
 ALTER TABLE `sales`
@@ -589,6 +743,12 @@ ALTER TABLE `sales`
 ALTER TABLE `sale_items`
   ADD CONSTRAINT `sale_items_ibfk_1` FOREIGN KEY (`sale_id`) REFERENCES `sales` (`id`) ON DELETE CASCADE,
   ADD CONSTRAINT `sale_items_ibfk_2` FOREIGN KEY (`book_id`) REFERENCES `books` (`id`) ON DELETE RESTRICT;
+
+--
+-- Constraints for table `users`
+--
+ALTER TABLE `users`
+  ADD CONSTRAINT `fk_users_role_id` FOREIGN KEY (`role_id`) REFERENCES `roles` (`id`) ON DELETE SET NULL;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
