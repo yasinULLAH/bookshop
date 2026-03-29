@@ -4690,18 +4690,6 @@ if ($settings_result) {
             .hamburger-menu {
                 order: -1;
             }
-            .public-header {
-                flex-direction: column;
-                padding: 15px 20px;
-            }
-            .public-header .logo {
-                margin-bottom: 15px;
-            }
-            .public-header nav ul {
-                flex-direction: column;
-                gap: 10px;
-                margin-bottom: 15px;
-            }
             .public-content {
                 padding: 20px;
                 margin: 10px auto;
@@ -5236,16 +5224,6 @@ if ($settings_result) {
             .public-sale-shell {
                 margin-top: 10px;
             }
-        }
-        .public-header {
-            height: auto !important;
-            flex-wrap: wrap !important;
-            overflow: visible !important;
-        }
-        .public-header nav,
-        .public-header nav ul {
-            overflow: visible !important;
-            white-space: normal !important;
         }
     </style>
     <style id="minimalist-compact-overrides">
@@ -5939,6 +5917,45 @@ if ($settings_result) {
             html {
                 font-size: 14px;
             }
+            .public-header {
+                flex-direction: column !important;
+                align-items: stretch !important;
+                padding: 15px 20px !important;
+            }
+            .public-header-brand {
+                width: 100%;
+            }
+            .public-hamburger {
+                display: block !important;
+            }
+            .public-nav, .public-header-actions {
+                display: none !important;
+            }
+            .public-header.menu-open .public-nav {
+                display: block !important;
+                margin-top: 15px;
+            }
+            .public-header.menu-open .public-nav ul {
+                flex-direction: column !important;
+                align-items: flex-start !important;
+                gap: 10px;
+            }
+            .public-header.menu-open .public-header-actions {
+                display: flex !important;
+                flex-direction: column !important;
+                align-items: stretch !important;
+                margin-top: 15px;
+            }
+            .public-header.menu-open .public-header-actions .login-btn {
+                text-align: center;
+                width: 100%;
+            }
+            body aside.sidebar nav ul li a {
+                white-space: normal !important;
+                word-break: break-word !important;
+                height: auto !important;
+                line-height: 1.3 !important;
+            }
             #app-container {
                 flex-direction: column;
             }
@@ -5964,19 +5981,53 @@ if ($settings_result) {
             body aside.sidebar.active {
                 transform: translateX(0);
             }
+            body aside.sidebar {
+                overflow-x: hidden !important;
+            }
             body aside.sidebar h2 {
                 display: block !important;
                 margin: 0 0 12px 0 !important;
-                font-size: 1rem !important;
+                font-size: 1.1rem !important;
+                width: 100% !important;
+                box-sizing: border-box !important;
             }
             body aside.sidebar nav {
                 display: block !important;
-                width: 100%;
-                margin-top: 2px;
+                width: 100% !important;
+                margin-top: 10px !important;
+            }
+            body aside.sidebar nav ul {
+                display: flex !important;
+                flex-direction: column !important;
+                flex-wrap: nowrap !important;
+                gap: 4px !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                width: 100% !important;
+            }
+            body aside.sidebar nav ul li {
+                display: block !important;
+                width: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            body aside.sidebar nav ul li a {
+                display: flex !important;
+                align-items: center !important;
+                justify-content: flex-start !important;
+                width: 100% !important;
+                box-sizing: border-box !important;
+                white-space: normal !important;
+                word-break: break-word !important;
+                height: auto !important;
+                line-height: 1.4 !important;
+                padding: 10px 12px !important;
             }
             body aside.sidebar .user-info,
             body aside.sidebar .dark-mode-toggle {
                 display: block !important;
+                width: 100% !important;
+                box-sizing: border-box !important;
             }
             .hamburger-menu {
                 display: inline-flex !important;
@@ -6244,9 +6295,12 @@ if ($settings_result) {
         </div>
     <?php elseif (in_array($page, ['home', 'books-public', 'about', 'contact', 'customer-dashboard', 'online-shop-cart', 'my-orders', 'public-sale'])): ?>
         <div id="public-site-container">
-            <header class="public-header">
-                <a href="index.php?page=home" class="logo"><?php echo html($public_settings['system_name'] ?? 'General Store & Bookshop'); ?></a>
-                <nav>
+            <header class="public-header" id="public-header">
+                <div class="public-header-brand" style="display: flex; justify-content: space-between; align-items: center;">
+                    <a href="index.php?page=home" class="logo"><?php echo html($public_settings['system_name'] ?? 'General Store & Bookshop'); ?></a>
+                    <button class="public-hamburger" id="public-hamburger" style="display: none; background: none; border: none; color: var(--text-color); font-size: 1.5em; cursor: pointer;"><i class="fas fa-bars"></i></button>
+                </div>
+                <nav class="public-nav">
                     <ul>
                         <li><a href="index.php?page=home" class="nav-link <?php echo $page === 'home' ? 'active' : ''; ?>">Home</a></li>
                         <li><a href="index.php?page=books-public" class="nav-link <?php echo $page === 'books-public' ? 'active' : ''; ?>">Products</a></li>
@@ -6258,7 +6312,7 @@ if ($settings_result) {
                         <li><a href="index.php?page=contact" class="nav-link <?php echo $page === 'contact' ? 'active' : ''; ?>">Contact Us</a></li>
                     </ul>
                 </nav>
-                <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                <div class="public-header-actions" style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
                     <?php if (isCustomer()): ?>
                         <a href="index.php?page=customer-dashboard" class="login-btn">My Dashboard</a>
                         <a href="index.php?action=logout" class="login-btn" style="background-color: var(--danger-color);">Logout</a>
@@ -11161,6 +11215,13 @@ if ($settings_result) {
             if (elements.hamburgerMenu) {
                 elements.hamburgerMenu.addEventListener('click', () => {
                     elements.sidebar.classList.toggle('active');
+                });
+            }
+            const publicHamburger = document.getElementById('public-hamburger');
+            const publicHeader = document.getElementById('public-header');
+            if (publicHamburger && publicHeader) {
+                publicHamburger.addEventListener('click', () => {
+                    publicHeader.classList.toggle('menu-open');
                 });
             }
             if (document.getElementById('mobile-nav-toggle')) {
